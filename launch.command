@@ -46,12 +46,12 @@ echo "[3/4] Installing optional broker libraries (safe to skip if this warns)...
 [ -f .env ] || { [ -f .env.example ] && cp .env.example .env; }
 [ -f config/config.yaml ] || { [ -f config/config.example.yaml ] && cp config/config.example.yaml config/config.yaml; }
 
-# Open the dashboard shortly after the server starts.
-( sleep 4; open "http://127.0.0.1:8000" ) &
-
 echo ""
 echo "======================================"
-echo "  Starting dashboard: http://127.0.0.1:8000"
+echo "  Starting the portal..."
+echo "  Your browser will open automatically to the dashboard."
+echo "  (If port 8000 is taken, it picks a free port and opens that URL"
+echo "   - watch the line that says 'Dashboard:'.)"
 echo "  Leave this window OPEN. Press Ctrl+C to stop."
 echo "======================================"
 echo ""

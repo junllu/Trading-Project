@@ -58,12 +58,13 @@ if not exist "config\config.yaml" if exist "config\config.example.yaml" copy "co
 
 echo.
 echo ======================================
-echo   Starting dashboard: http://127.0.0.1:8000
-echo   Your browser will open in a few seconds.
+echo   Starting the portal...
+echo   Your browser will open automatically to the dashboard.
+echo   (If port 8000 is taken by another app, it picks a free one and
+echo    opens that URL - watch the line that says "Dashboard:".)
 echo   Leave this window OPEN. Press Ctrl+C to stop.
 echo ======================================
 echo.
-start "" http://127.0.0.1:8000
 "%PY%" run.py
 echo.
 echo (The portal has stopped.)
