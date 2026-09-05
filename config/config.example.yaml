@@ -43,3 +43,24 @@ strategies:
 
 # How often the engine wakes up to pull data and evaluate strategies (seconds).
 loop_interval_seconds: 60
+
+# The Daily Agent — runs the full routine (analyze → blend conviction → size →
+# route orders) once per day and produces a morning brief.
+agent:
+  run_at: "09:00"          # local time to fire the daily routine
+  execute: true            # route conviction orders through the executor (mode-aware)
+  sizing:
+    base_budget: 1000      # $ per order at full conviction, average volatility
+    entry_threshold: 0.2   # skip trades weaker than this |conviction|
+    max_budget: 2000       # $ ceiling per order (risk manager still applies)
+  # How much to trust each signal source in the conviction blend. Your own
+  # sources (serenity, professor_jiang, personal) are first-class — set their
+  # weight and feed scores in.
+  conviction_weights:
+    technical: 0.30
+    analyst: 0.30          # Claude (Opus) rating; heuristic if no API key
+    sentiment: 0.15
+    geopolitical: 0.10
+    serenity: 0.05
+    professor_jiang: 0.05
+    personal: 0.05

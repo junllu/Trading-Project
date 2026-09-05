@@ -128,6 +128,24 @@
       <div class="empty" id="signalsEmpty">No signals yet.</div>
     </section>
 
+    <!-- ===================== DAILY AGENT ===================== -->
+    <section class="card col-12" style="border-color:#2f4a3a;">
+      <h2>🤖 Daily Agent
+        <span class="pill" id="analystChip" style="margin-left:8px;">analyst: —</span>
+        <span class="pill" id="scheduleChip" style="margin-left:4px;">schedule: —</span>
+      </h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center;">
+        <button class="go" onclick="runAgent(this)">▶ Run Daily Analysis</button>
+        <button id="schedBtn" onclick="toggleSchedule()">Start Schedule</button>
+        <span class="muted" id="agentSummary" style="flex:1;min-width:240px;">Not run yet.</span>
+      </div>
+      <table><thead><tr>
+        <th>Symbol</th><th>Action</th><th class="num">Conviction</th>
+        <th class="num">Technical</th><th class="num">Analyst</th><th class="num">Senti</th><th class="num">Geo</th>
+      </tr></thead><tbody id="convictions"></tbody></table>
+      <div class="empty" id="convEmpty">Run the agent to compute conviction across your book.</div>
+    </section>
+
     <!-- ===================== INTELLIGENCE & OPTIONS ===================== -->
     <section class="card col-12" style="border-color:#2c3a52;">
       <h2>🌐 Geopolitical Assessment
@@ -331,8 +349,57 @@
       $("stnEmpty").hidden = stn.length>0;
     }
 
+    const actionCls = (a) => a.includes("buy")?"buy":(a.includes("sell")?"sell":"");
+    function sig(v){ return v==null?'<span class="muted">—</span>':`<span class="${v>0?'pos':(v<0?'neg':'')}">${v>=0?'+':''}${v.toFixed(2)}</span>`; }
+
+    function renderReport(rep){
+      if (!rep || !rep.convictions){ return; }
+      $("agentSummary").textContent = rep.summary || "";
+      const rows = rep.convictions.map(c=>{
+        const i = c.inputs||{};
+        return `<tr><td><b>${c.symbol}</b></td>
+          <td><span class="pill ${actionCls(c.action)}">${c.action.replace('_',' ')}</span></td>
+          <td class="num">${sig(c.score)}</td>
+          <td class="num">${sig(i.technical)}</td><td class="num">${sig(i.analyst)}</td>
+          <td class="num">${sig(i.sentiment)}</td><td class="num">${sig(i.geopolitical)}</td></tr>`;
+      }).join("");
+      $("convictions").innerHTML = rows;
+      $("convEmpty").hidden = rep.convictions.length>0;
+    }
+
+    async function runAgent(btn){
+      btn.disabled = true; const old = btn.textContent; btn.textContent = "Running…";
+      try { const rep = await (await fetch("/api/agent/run",{method:"POST"})).json(); renderReport(rep); refresh(); }
+      catch(e){ $("agentSummary").textContent = "✗ "+e.message; }
+      finally { btn.disabled = false; btn.textContent = old; }
+    }
+    async function toggleSchedule(){
+      const on = $("schedBtn").dataset.on === "1";
+      await fetch(on?"/api/agent/schedule/stop":"/api/agent/schedule/start",{method:"POST"});
+      refresh();
+    }
+    async function loadReport(){
+      try { const rep = await (await fetch("/api/agent/report")).json(); if (rep && rep.convictions) renderReport(rep); } catch(e){}
+    }
+
+    // fold agent/analyst status into the main poll
+    const _origRefresh = refresh;
+    refresh = async function(){
+      await _origRefresh();
+      try {
+        const s = await (await fetch("/api/status")).json();
+        const an = s.analyst||{};
+        $("analystChip").textContent = "analyst: " + (an.live ? ("Claude "+(an.model||"")) : "heuristic");
+        const sc = s.schedule||{};
+        $("scheduleChip").textContent = "schedule: " + (sc.running ? ("on @ "+sc.at) : "off");
+        $("schedBtn").dataset.on = sc.running ? "1":"0";
+        $("schedBtn").textContent = sc.running ? "Stop Schedule":"Start Schedule";
+      } catch(e){}
+    };
+
     refresh();
     refreshIntel();
+    loadReport();
     setInterval(refresh, 4000);
     setInterval(refreshIntel, 30000);
   </script>

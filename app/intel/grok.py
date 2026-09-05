@@ -61,7 +61,8 @@ _MOCK_EVENTS = [
 
 class GrokClient:
     def __init__(self, api_key: str | None = None):
-        self.api_key = api_key or os.getenv("XAI_API_KEY", "")
+        # None => read env; an explicit string (incl. "") is an override.
+        self.api_key = os.getenv("XAI_API_KEY", "") if api_key is None else api_key
 
     @property
     def live(self) -> bool:

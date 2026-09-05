@@ -13,12 +13,18 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from .agent.daily import DailyAgent
+from .agent.scheduler import DailyScheduler
+from .analytics import ConvictionEngine
+from .analytics.technical import technical_score
 from .brokers import build_brokers
 from .brokers.base import BrokerBase
 from .config import Settings, TradingMode, settings as global_settings
 from .data import MarketData
 from .engine import Executor, RiskManager
+from .engine.sizing import SizingParams
 from .intel import IntelService
+from .intel.claude_analyst import ClaudeAnalyst
 from .models import Signal
 from .options import (
     cash_secured_put_candidates,
@@ -48,6 +54,10 @@ class Portal:
     executor: Optional[Executor] = None
     portfolio: Optional[PortfolioService] = None
     intel: IntelService = field(default_factory=IntelService)
+    analyst: ClaudeAnalyst = field(default_factory=ClaudeAnalyst)
+    conviction: ConvictionEngine = field(default_factory=ConvictionEngine)
+    daily_agent: Optional[DailyAgent] = None
+    scheduler: Optional[DailyScheduler] = None
     strategy_runs: list[StrategyRun] = field(default_factory=list)
     signal_log: list[Signal] = field(default_factory=list)
     held_symbols: list[str] = field(default_factory=list)
@@ -83,6 +93,19 @@ class Portal:
             holdings = load_holdings()
             if holdings:
                 self.held_symbols = seed_paper_broker(paper, holdings)
+                # Backfill a plausible cost->current price path per holding so
+                # technicals are meaningful on day one (stand-in for a data feed).
+                by_symbol: dict[str, dict] = {}
+                for h in holdings:
+                    by_symbol.setdefault(str(h["symbol"]).upper(), h)
+                for sym, h in by_symbol.items():
+                    self.market.backfill_trend(
+                        sym, float(h.get("avg_price", h.get("last", 0))),
+                        float(h.get("last", h.get("avg_price", 0))),
+                    )
+                # Your holdings are tradeable by the agent, so allow them at the risk gate.
+                if self.risk is not None:
+                    self.risk.allowed_symbols.update(self.held_symbols)
 
         self.strategy_runs = []
         for spec in self.settings.strategies:
@@ -91,6 +114,17 @@ class Portal:
                 self.strategy_runs.append(StrategyRun(strat, spec.get("symbols", [])))
             except KeyError as exc:
                 log.warning("skipping strategy: %s", exc)
+
+        # Conviction weights (optional) from config.
+        agent_cfg = self.settings.raw.get("agent", {}) or {}
+        weights = agent_cfg.get("conviction_weights")
+        self.conviction = ConvictionEngine(weights)
+        self.daily_agent = DailyAgent(
+            self, analyst=self.analyst, conviction=self.conviction,
+            sizing=SizingParams(**(agent_cfg.get("sizing", {}) or {})),
+            execute=agent_cfg.get("execute", True),
+        )
+        self.scheduler = DailyScheduler(self.daily_agent.run, at=agent_cfg.get("run_at", "09:00"))
         return self
 
     def ensure_built(self) -> "Portal":
@@ -131,6 +165,35 @@ class Portal:
         for run in self.strategy_runs:
             syms.update(run.symbols)
         return sorted(syms)
+
+    # analytics + daily agent ----------------------------------------------
+    def analytics(self) -> dict[str, Any]:
+        """Composite technical score per symbol in the universe."""
+        self.ensure_built()
+        out = {}
+        for s in self._all_symbols():
+            out[s] = technical_score(s, self.market.history(s)).to_dict()
+        return out
+
+    def run_daily(self) -> dict[str, Any]:
+        """Fire the daily agent once, on demand."""
+        self.ensure_built()
+        return self.daily_agent.run().to_dict()
+
+    def last_report(self) -> dict[str, Any]:
+        self.ensure_built()
+        rep = self.daily_agent.last_report
+        return rep.to_dict() if rep else {}
+
+    def start_schedule(self) -> dict[str, Any]:
+        self.ensure_built()
+        self.scheduler.start()
+        return self.scheduler.status()
+
+    def stop_schedule(self) -> dict[str, Any]:
+        self.ensure_built()
+        self.scheduler.stop()
+        return self.scheduler.status()
 
     # intelligence + options -----------------------------------------------
     def intel_briefing(self, force: bool = False, use_x: bool = False) -> dict[str, Any]:
@@ -237,6 +300,8 @@ class Portal:
             "watchlist": [{"symbol": s, "price": prices.get(s, 0.0)} for s in self._all_symbols()],
             "intel_sources": self.intel.sources_live,
             "held_symbols": self.held_symbols,
+            "analyst": {"live": self.analyst.live, "model": self.analyst.model},
+            "schedule": self.scheduler.status() if self.scheduler else {},
         }
 
     @staticmethod

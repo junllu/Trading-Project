@@ -56,6 +56,35 @@ def options_plans(days: int = 30):
     return portal.ensure_built().option_plans(days=days)
 
 
+# --- analytics + daily agent ----------------------------------------------
+@router.get("/analytics")
+def analytics():
+    """Composite technical score per symbol."""
+    return portal.ensure_built().analytics()
+
+
+@router.post("/agent/run")
+def agent_run():
+    """Run the daily agent now: analyze, blend conviction, size, route orders."""
+    return portal.ensure_built().run_daily()
+
+
+@router.get("/agent/report")
+def agent_report():
+    """The most recent daily report (empty until the agent has run)."""
+    return portal.ensure_built().last_report()
+
+
+@router.post("/agent/schedule/start")
+def agent_schedule_start():
+    return portal.ensure_built().start_schedule()
+
+
+@router.post("/agent/schedule/stop")
+def agent_schedule_stop():
+    return portal.ensure_built().stop_schedule()
+
+
 # --- kill switch -----------------------------------------------------------
 @router.post("/kill")
 def kill():

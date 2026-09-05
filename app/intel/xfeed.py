@@ -45,7 +45,8 @@ class XBuzz:
 
 class XFeed:
     def __init__(self, bearer_token: str | None = None):
-        self.bearer = bearer_token or os.getenv("X_BEARER_TOKEN", "")
+        # None => read env; an explicit string (incl. "") is an override.
+        self.bearer = os.getenv("X_BEARER_TOKEN", "") if bearer_token is None else bearer_token
 
     @property
     def live(self) -> bool:
