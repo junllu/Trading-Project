@@ -1,19 +1,8 @@
-# Web framework
-fastapi>=0.110
-uvicorn[standard]>=0.27
-jinja2>=3.1
-python-multipart>=0.0.9
+# Full install = essentials + broker integrations.
+# The launchers install requirements-core.txt first (so the app always runs),
+# then attempt the broker libraries below (needed only for LIVE Robinhood/Webull).
+-r requirements-core.txt
 
-# Config & security
-pydantic>=2.6
-pydantic-settings>=2.2
-PyYAML>=6.0
-python-dotenv>=1.0
-cryptography>=42.0
-
-# Broker integrations (unofficial — install as needed)
+# Broker integrations (unofficial — only needed when you go live on a real broker)
 robin-stocks>=3.1
 webull>=0.6
-
-# Data / analysis (optional; core indicators are pure-Python)
-requests>=2.31

@@ -5,23 +5,66 @@ title Automated Trading Portal
 echo ======================================
 echo    Automated Trading Portal - launch
 echo ======================================
+echo.
 
-if not exist ".venv\" (
-  echo First run: creating virtual environment...
-  python -m venv .venv || (echo Could not create venv. Is Python installed and on PATH? & pause & exit /b 1)
+REM 1. Ensure a virtual environment exists.
+if not exist ".venv\Scripts\python.exe" (
+  echo [1/4] Creating virtual environment ^(one-time^)...
+  python -m venv .venv
+  if errorlevel 1 (
+    echo.
+    echo ERROR: could not create the virtual environment.
+    echo Make sure Python 3 is installed from python.org and "Add to PATH" was checked.
+    echo Test it by opening Command Prompt and running:  python --version
+    echo.
+    pause
+    exit /b 1
+  )
+) else (
+  echo [1/4] Virtual environment found.
 )
-call .venv\Scripts\activate.bat
 
-echo Checking dependencies...
-python -m pip install -q --upgrade pip >nul 2>&1
-pip install -q -r requirements.txt || (echo Dependency install failed. & pause & exit /b 1)
+set "PY=.venv\Scripts\python.exe"
 
-if not exist ".env" if exist ".env.example" copy ".env.example" ".env" >nul & echo Created .env (add your API keys later).
+REM 2. Upgrade pip (visible).
+echo [2/4] Preparing installer...
+"%PY%" -m pip install --upgrade pip
+
+REM 3. Install ESSENTIALS (visible progress). First run: a couple of minutes.
+echo.
+echo [3/4] Installing required packages ^(first run can take 2-5 minutes^)...
+echo       You will see download progress below - this is normal, please wait.
+echo.
+"%PY%" -m pip install -r requirements-core.txt
+if errorlevel 1 (
+  echo.
+  echo ERROR: installing required packages failed. Check your internet connection
+  echo and try again. If it persists, run this in Command Prompt to see the error:
+  echo    "%PY%" -m pip install -r requirements-core.txt
+  echo.
+  pause
+  exit /b 1
+)
+
+REM 3b. Broker libraries are OPTIONAL (only for live Robinhood/Webull). Never block startup.
+echo.
+echo [3/4] Installing optional broker libraries ^(safe to skip if this warns^)...
+"%PY%" -m pip install robin-stocks webull
+if errorlevel 1 echo NOTE: broker libraries did not install - the portal still runs in paper mode.
+
+REM 4. First-run config scaffolding.
+if not exist ".env" if exist ".env.example" copy ".env.example" ".env" >nul
 if not exist "config\config.yaml" if exist "config\config.example.yaml" copy "config\config.example.yaml" "config\config.yaml" >nul
 
 echo.
-echo Starting dashboard at http://127.0.0.1:8000
-echo Leave this window open. Press Ctrl+C to stop.
+echo ======================================
+echo   Starting dashboard: http://127.0.0.1:8000
+echo   Your browser will open in a few seconds.
+echo   Leave this window OPEN. Press Ctrl+C to stop.
+echo ======================================
+echo.
 start "" http://127.0.0.1:8000
-python run.py
+"%PY%" run.py
+echo.
+echo (The portal has stopped.)
 pause

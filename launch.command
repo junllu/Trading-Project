@@ -1,36 +1,61 @@
 #!/bin/bash
 # Trading Portal launcher for macOS.
 # Double-click this file in Finder to start the portal and open the dashboard.
-# (First run sets up a virtual environment and installs dependencies.)
 
 cd "$(dirname "$0")" || exit 1
 clear
 echo "======================================"
-echo "   Automated Trading Portal — launch"
+echo "   Automated Trading Portal - launch"
 echo "======================================"
+echo ""
 
 # 1. Ensure a virtual environment exists.
-if [ ! -d ".venv" ]; then
-  echo "First run: creating virtual environment..."
-  python3 -m venv .venv || { echo "Could not create venv. Is Python 3 installed?"; read -r; exit 1; }
+if [ ! -x ".venv/bin/python" ]; then
+  echo "[1/4] Creating virtual environment (one-time)..."
+  python3 -m venv .venv || {
+    echo ""
+    echo "ERROR: could not create the virtual environment."
+    echo "Install Python 3 from https://www.python.org/downloads/ and try again."
+    read -r -p "Press Return to close."; exit 1;
+  }
+else
+  echo "[1/4] Virtual environment found."
 fi
-# shellcheck disable=SC1091
-source .venv/bin/activate
+PY=".venv/bin/python"
 
-# 2. Install / update dependencies (quiet; only prints on error).
-echo "Checking dependencies..."
-pip install -q --upgrade pip >/dev/null 2>&1
-pip install -q -r requirements.txt || { echo "Dependency install failed."; read -r; exit 1; }
+# 2. Upgrade pip (visible).
+echo "[2/4] Preparing installer..."
+"$PY" -m pip install --upgrade pip
 
-# 3. First-run config scaffolding.
-[ -f .env ] || { [ -f .env.example ] && cp .env.example .env && echo "Created .env (add your API keys later)."; }
+# 3. Install ESSENTIALS (visible progress).
+echo ""
+echo "[3/4] Installing required packages (first run can take 2-5 minutes)..."
+echo "      Download progress appears below - this is normal, please wait."
+echo ""
+"$PY" -m pip install -r requirements-core.txt || {
+  echo ""; echo "ERROR: installing required packages failed. Check your connection and retry.";
+  read -r -p "Press Return to close."; exit 1;
+}
+
+# 3b. Broker libraries are OPTIONAL - never block startup.
+echo ""
+echo "[3/4] Installing optional broker libraries (safe to skip if this warns)..."
+"$PY" -m pip install robin-stocks webull || echo "NOTE: broker libraries did not install - the portal still runs in paper mode."
+
+# 4. First-run config scaffolding.
+[ -f .env ] || { [ -f .env.example ] && cp .env.example .env; }
 [ -f config/config.yaml ] || { [ -f config/config.example.yaml ] && cp config/config.example.yaml config/config.yaml; }
 
-# 4. Open the dashboard shortly after the server starts.
-( sleep 3; open "http://127.0.0.1:8000" ) &
+# Open the dashboard shortly after the server starts.
+( sleep 4; open "http://127.0.0.1:8000" ) &
 
 echo ""
-echo "Starting dashboard at http://127.0.0.1:8000"
-echo "Leave this window open. Press Ctrl+C here to stop the portal."
+echo "======================================"
+echo "  Starting dashboard: http://127.0.0.1:8000"
+echo "  Leave this window OPEN. Press Ctrl+C to stop."
+echo "======================================"
 echo ""
-python run.py
+"$PY" run.py
+echo ""
+echo "(The portal has stopped.)"
+read -r -p "Press Return to close."
