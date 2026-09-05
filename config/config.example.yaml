@@ -1,0 +1,45 @@
+# Copy to config/config.yaml and edit. config.yaml is git-ignored.
+
+# Which brokers to activate. Disabled brokers are ignored entirely.
+brokers:
+  paper:
+    enabled: true
+    starting_cash: 100000
+  robinhood:
+    enabled: false
+  webull:
+    enabled: false
+
+# Symbols the portal tracks, analyzes, and can trade.
+watchlist:
+  - AAPL
+  - MSFT
+  - NVDA
+  - SPY
+
+# Risk limits — enforced on EVERY order before it reaches a broker.
+risk:
+  max_position_value: 5000      # max $ in any single symbol
+  max_order_value: 2000         # max $ for one order
+  max_orders_per_day: 20        # circuit breaker on order count
+  max_daily_loss: 1000          # halt trading if realized loss exceeds this
+  allowed_symbols_only: true    # only trade symbols on the watchlist
+
+# Strategies to run. Each maps to a class in app/strategy/examples.py.
+strategies:
+  - name: sma_crossover
+    symbols: [AAPL, MSFT, NVDA]
+    params:
+      fast: 10
+      slow: 30
+      order_value: 1000         # $ per signal
+  - name: rsi_reversion
+    symbols: [SPY]
+    params:
+      period: 14
+      oversold: 30
+      overbought: 70
+      order_value: 1000
+
+# How often the engine wakes up to pull data and evaluate strategies (seconds).
+loop_interval_seconds: 60

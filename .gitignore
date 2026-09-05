@@ -1,0 +1,26 @@
+# Secrets & config
+.env
+config/config.yaml
+*.key
+secrets/
+data/*.db
+data/*.sqlite
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.log

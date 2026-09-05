@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Automated Trading Portal</title>
+  <style>
+    :root {
+      --bg:#0b0e14; --panel:#131823; --panel2:#1b2231; --line:#26304a;
+      --text:#e6e9ef; --muted:#8b93a7; --green:#3fb950; --red:#f85149;
+      --accent:#58a6ff; --warn:#e3b341;
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text);
+      font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+    header { display:flex; align-items:center; gap:16px; padding:14px 20px;
+      background:var(--panel); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:5; }
+    header h1 { font-size:16px; margin:0; letter-spacing:.3px; }
+    .mode { padding:3px 10px; border-radius:999px; font-size:12px; font-weight:600;
+      background:var(--panel2); border:1px solid var(--line); }
+    .mode.paper { color:var(--accent); } .mode.confirm { color:var(--warn); } .mode.live { color:var(--red); }
+    .spacer { flex:1; }
+    button { background:var(--panel2); color:var(--text); border:1px solid var(--line);
+      padding:7px 12px; border-radius:8px; cursor:pointer; font-size:13px; }
+    button:hover { border-color:var(--accent); }
+    button.danger { color:var(--red); border-color:#5c2626; }
+    button.danger.armed { background:var(--red); color:#fff; }
+    button.go { color:var(--green); }
+    main { padding:20px; display:grid; gap:16px; grid-template-columns:repeat(12,1fr); max-width:1300px; margin:0 auto; }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; }
+    .card h2 { font-size:12px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); margin:0 0 12px; }
+    .col-4 { grid-column:span 4; } .col-6 { grid-column:span 6; } .col-8 { grid-column:span 8; } .col-12 { grid-column:span 12; }
+    @media (max-width:900px){ .col-4,.col-6,.col-8 { grid-column:span 12; } }
+    .stat { font-size:26px; font-weight:700; }
+    .stat.sub { font-size:13px; color:var(--muted); font-weight:400; }
+    .kpis { display:flex; gap:24px; flex-wrap:wrap; }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    th,td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); white-space:nowrap; }
+    th { color:var(--muted); font-weight:600; font-size:11px; text-transform:uppercase; }
+    td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }
+    .pos { color:var(--green); } .neg { color:var(--red); }
+    .pill { padding:2px 8px; border-radius:6px; font-size:11px; background:var(--panel2); border:1px solid var(--line); }
+    .pill.buy { color:var(--green); } .pill.sell { color:var(--red); }
+    .pill.filled { color:var(--green); } .pill.rejected { color:var(--red); }
+    .pill.queued { color:var(--warn); } .pill.submitted { color:var(--accent); }
+    form.order { display:flex; gap:8px; flex-wrap:wrap; align-items:end; }
+    form.order label { display:flex; flex-direction:column; gap:3px; font-size:11px; color:var(--muted); }
+    form.order input, form.order select { background:var(--panel2); color:var(--text);
+      border:1px solid var(--line); border-radius:7px; padding:6px 8px; font-size:13px; }
+    .muted { color:var(--muted); }
+    .empty { color:var(--muted); padding:8px 0; font-size:13px; }
+    .banner { padding:8px 12px; border-radius:8px; background:#3a1d1d; color:var(--red);
+      border:1px solid #5c2626; margin:0 20px; display:none; }
+    .banner.show { display:block; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>⚙︎ Trading Portal</h1>
+    <span class="mode {{ mode }}" id="mode">{{ mode }}</span>
+    <span class="pill" id="loopState">loop: —</span>
+    <div class="spacer"></div>
+    <button class="go" onclick="api('/api/tick','POST')">Run Tick</button>
+    <button id="loopBtn" onclick="toggleLoop()">Start Loop</button>
+    <button class="danger" id="killBtn" onclick="toggleKill()">Kill-Switch</button>
+  </header>
+
+  <div class="banner" id="killBanner">⛔ Kill-switch engaged — all execution is halted.</div>
+
+  <main>
+    <section class="card col-12">
+      <h2>Account</h2>
+      <div class="kpis">
+        <div><div class="stat" id="equity">—</div><div class="stat sub">Equity</div></div>
+        <div><div class="stat" id="cash">—</div><div class="stat sub">Cash</div></div>
+        <div><div class="stat" id="upnl">—</div><div class="stat sub">Unrealized P&amp;L</div></div>
+        <div><div class="stat" id="ordersToday">—</div><div class="stat sub">Orders Today</div></div>
+        <div><div class="stat" id="dailyLoss">—</div><div class="stat sub">Realized Loss (day)</div></div>
+      </div>
+    </section>
+
+    <section class="card col-8">
+      <h2>Positions</h2>
+      <table><thead><tr>
+        <th>Symbol</th><th class="num">Qty</th><th class="num">Avg</th><th class="num">Last</th>
+        <th class="num">Value</th><th class="num">P&amp;L</th><th class="num">%</th><th>Brokers</th>
+      </tr></thead><tbody id="positions"></tbody></table>
+      <div class="empty" id="positionsEmpty" hidden>No open positions.</div>
+    </section>
+
+    <section class="card col-4">
+      <h2>Watchlist</h2>
+      <table><thead><tr><th>Symbol</th><th class="num">Price</th></tr></thead>
+        <tbody id="watchlist"></tbody></table>
+    </section>
+
+    <section class="card col-6">
+      <h2>Manual Order</h2>
+      <form class="order" onsubmit="return submitOrder(event)">
+        <label>Symbol<input name="symbol" placeholder="AAPL" required /></label>
+        <label>Side<select name="side"><option value="buy">Buy</option><option value="sell">Sell</option></select></label>
+        <label>Quantity<input name="quantity" type="number" step="0.0001" min="0" value="1" required /></label>
+        <label>Type<select name="order_type"><option value="market">Market</option><option value="limit">Limit</option></select></label>
+        <label>Limit<input name="limit_price" type="number" step="0.01" min="0" placeholder="—" /></label>
+        <button type="submit">Submit</button>
+      </form>
+      <div id="orderMsg" class="empty"></div>
+    </section>
+
+    <section class="card col-6">
+      <h2>Pending Approval</h2>
+      <table><thead><tr><th>Symbol</th><th>Side</th><th class="num">Qty</th><th></th></tr></thead>
+        <tbody id="pending"></tbody></table>
+      <div class="empty" id="pendingEmpty">Nothing awaiting approval.</div>
+    </section>
+
+    <section class="card col-6">
+      <h2>Recent Orders</h2>
+      <table><thead><tr><th>Symbol</th><th>Side</th><th class="num">Qty</th><th>Status</th><th>Detail</th></tr></thead>
+        <tbody id="orders"></tbody></table>
+      <div class="empty" id="ordersEmpty">No orders yet.</div>
+    </section>
+
+    <section class="card col-6">
+      <h2>Recent Signals</h2>
+      <table><thead><tr><th>Symbol</th><th>Side</th><th>Strategy</th><th>Note</th></tr></thead>
+        <tbody id="signals"></tbody></table>
+      <div class="empty" id="signalsEmpty">No signals yet.</div>
+    </section>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const money = (n) => (n==null?"—":"$"+Number(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}));
+    const cls = (n) => n>0?"pos":(n<0?"neg":"");
+
+    async function api(path, method="GET", body=null){
+      const opt = { method, headers:{"Content-Type":"application/json"} };
+      if (body) opt.body = JSON.stringify(body);
+      const r = await fetch(path, opt);
+      if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+      const data = await r.json();
+      refresh();
+      return data;
+    }
+
+    async function toggleKill(){
+      const killed = $("killBtn").classList.contains("armed");
+      await api(killed ? "/api/resume" : "/api/kill", "POST");
+    }
+    async function toggleLoop(){
+      const running = $("loopBtn").dataset.running === "1";
+      await api(running ? "/api/loop/stop" : "/api/loop/start", "POST");
+    }
+    async function approve(id){ await api(`/api/orders/${id}/approve`, "POST"); }
+    async function reject(id){ await api(`/api/orders/${id}/reject`, "POST"); }
+
+    async function submitOrder(e){
+      e.preventDefault();
+      const f = e.target;
+      const body = {
+        symbol:f.symbol.value, side:f.side.value, quantity:parseFloat(f.quantity.value),
+        order_type:f.order_type.value,
+        limit_price:f.limit_price.value?parseFloat(f.limit_price.value):null
+      };
+      try { const o = await api("/api/orders/manual","POST",body);
+        $("orderMsg").textContent = `Order ${o.id}: ${o.status}${o.reason?" — "+o.reason:""}`; }
+      catch(err){ $("orderMsg").textContent = "✗ "+err.message; }
+      return false;
+    }
+
+    function rowsPositions(ps){
+      return ps.map(p=>`<tr><td>${p.symbol}</td><td class="num">${p.quantity}</td>
+        <td class="num">${money(p.avg_price)}</td><td class="num">${money(p.price)}</td>
+        <td class="num">${money(p.market_value)}</td>
+        <td class="num ${cls(p.unrealized_pnl)}">${money(p.unrealized_pnl)}</td>
+        <td class="num ${cls(p.unrealized_pct)}">${p.unrealized_pct}%</td>
+        <td class="muted">${p.brokers.join(", ")}</td></tr>`).join("");
+    }
+
+    async function refresh(){
+      let s;
+      try { s = await (await fetch("/api/status")).json(); } catch(e){ return; }
+      $("mode").textContent = s.mode; $("mode").className = "mode "+s.mode;
+
+      const killed = s.killed;
+      $("killBtn").classList.toggle("armed", killed);
+      $("killBtn").textContent = killed ? "Resume" : "Kill-Switch";
+      $("killBanner").classList.toggle("show", killed);
+
+      $("loopBtn").dataset.running = s.loop_running ? "1":"0";
+      $("loopBtn").textContent = s.loop_running ? "Stop Loop":"Start Loop";
+      $("loopState").textContent = "loop: "+(s.loop_running?"running":"stopped");
+
+      const pf = s.portfolio||{};
+      $("equity").textContent = money(pf.equity);
+      $("cash").textContent = money(pf.cash);
+      $("upnl").textContent = money(pf.unrealized_pnl);
+      $("upnl").className = "stat "+cls(pf.unrealized_pnl);
+      $("ordersToday").textContent = s.risk.orders_today+" / "+s.risk.max_orders_per_day;
+      $("dailyLoss").textContent = money(s.risk.realized_loss);
+
+      const ps = pf.positions||[];
+      $("positions").innerHTML = rowsPositions(ps);
+      $("positionsEmpty").hidden = ps.length>0;
+
+      $("watchlist").innerHTML = (s.watchlist||[]).map(w=>
+        `<tr><td>${w.symbol}</td><td class="num">${money(w.price)}</td></tr>`).join("");
+
+      const pend = s.pending_orders||[];
+      $("pending").innerHTML = pend.map(o=>`<tr><td>${o.symbol}</td>
+        <td><span class="pill ${o.side}">${o.side}</span></td><td class="num">${o.quantity}</td>
+        <td><button class="go" onclick="approve('${o.id}')">✓</button>
+            <button class="danger" onclick="reject('${o.id}')">✕</button></td></tr>`).join("");
+      $("pendingEmpty").hidden = pend.length>0;
+
+      const ords = s.recent_orders||[];
+      $("orders").innerHTML = ords.map(o=>`<tr><td>${o.symbol}</td>
+        <td><span class="pill ${o.side}">${o.side}</span></td><td class="num">${o.quantity}</td>
+        <td><span class="pill ${o.status}">${o.status}</span></td>
+        <td class="muted">${o.reason||""}</td></tr>`).join("");
+      $("ordersEmpty").hidden = ords.length>0;
+
+      const sigs = s.recent_signals||[];
+      $("signals").innerHTML = sigs.map(x=>`<tr><td>${x.symbol}</td>
+        <td><span class="pill ${x.side}">${x.side}</span></td>
+        <td>${x.strategy}</td><td class="muted">${x.note}</td></tr>`).join("");
+      $("signalsEmpty").hidden = sigs.length>0;
+    }
+
+    refresh();
+    setInterval(refresh, 4000);
+  </script>
+</body>
+</html>
