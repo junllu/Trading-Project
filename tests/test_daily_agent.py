@@ -15,6 +15,8 @@ def build_portal():
     p = Portal(settings=Settings(mode=TradingMode.PAPER, raw=raw)).build()
     # Ignore any real holdings.yaml on disk so the test universe is just AAA/BBB.
     p.held_symbols = []
+    # Point the campaign's focus at the test symbols so BUY concentration allows them.
+    p.campaign.focus_symbols = ["AAA", "BBB"]
     # seed a clean uptrend and downtrend so technicals are decisive
     p.market.seed_history("AAA", [100 + i for i in range(60)])
     p.market.seed_history("BBB", [160 - i for i in range(60)])

@@ -66,8 +66,30 @@
   </header>
 
   <div class="banner" id="killBanner">⛔ Kill-switch engaged — all execution is halted.</div>
+  <div class="banner" id="campBanner">⛔ Campaign drawdown halt — capital preservation engaged.</div>
 
   <main>
+    <!-- ===================== CAMPAIGN: MISSION TO $1M ===================== -->
+    <section class="card col-12" id="campCard" style="border-color:#3a5a3a;background:linear-gradient(180deg,#141b22,#131823);">
+      <h2>🎯 Campaign — Mission to $1,000,000
+        <span class="pill" id="campPhase" style="margin-left:8px;">—</span>
+        <span class="pill" id="campPace" style="margin-left:4px;">—</span>
+      </h2>
+      <div class="kpis" style="margin-bottom:10px;">
+        <div><div class="stat" id="campEquity">—</div><div class="stat sub">Book value</div></div>
+        <div><div class="stat" id="campTarget">$1,000,000</div><div class="stat sub">Target</div></div>
+        <div><div class="stat" id="campDays">—</div><div class="stat sub">Days left (→ 2027-end)</div></div>
+        <div><div class="stat" id="campReq">—</div><div class="stat sub">Required return/yr</div></div>
+        <div><div class="stat" id="campDD">—</div><div class="stat sub">Drawdown / halt</div></div>
+      </div>
+      <div style="height:14px;border-radius:8px;background:var(--panel2);overflow:hidden;border:1px solid var(--line);">
+        <div id="campBar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--green),var(--accent));transition:width .6s;"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-top:6px;">
+        <span class="muted" id="campNote" style="font-size:12px;"></span>
+        <span class="muted" style="font-size:12px;">Focus: <b id="campFocus">—</b></span>
+      </div>
+    </section>
     <section class="card col-12">
       <h2>Account</h2>
       <div class="kpis">
@@ -284,6 +306,23 @@
       $("ordersEmpty").hidden = ords.length>0;
 
       window._sources = s.intel_sources || {};
+
+      // --- campaign banner ---
+      const cp = s.campaign||{};
+      if (cp.target){
+        $("campEquity").textContent = money(cp.equity);
+        $("campDays").textContent = cp.days_remaining;
+        $("campReq").textContent = (cp.required_cagr_pct!=null? cp.required_cagr_pct+"%":"—");
+        $("campDD").textContent = (cp.drawdown_pct||0)+"% / "+(cp.drawdown_halt_pct||0)+"%";
+        $("campDD").className = "stat "+(cp.breached?"neg":"");
+        $("campBar").style.width = Math.min(100, (cp.progress_pct||0))+"%";
+        $("campPhase").textContent = "phase: "+(cp.phase||"—");
+        $("campPace").textContent = "pace: "+(cp.pace||"—");
+        $("campPace").className = "pill "+(cp.pace==="ahead"?"buy":(cp.pace==="behind"?"sell":""));
+        $("campFocus").textContent = (cp.focus_symbols||[]).join(", ");
+        $("campNote").textContent = cp.note||"";
+        $("campBanner").classList.toggle("show", !!cp.breached);
+      }
 
       const sigs = s.recent_signals||[];
       $("signals").innerHTML = sigs.map(x=>`<tr><td>${x.symbol}</td>

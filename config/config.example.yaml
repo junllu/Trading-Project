@@ -64,3 +64,14 @@ agent:
     serenity: 0.05
     professor_jiang: 0.05
     personal: 0.05
+
+# The Campaign — the mission. Grow the EXISTING capital to the target by the
+# deadline, concentrated in a few blue-chip volatile cycle plays, without giving
+# the gains back. "make no mistake" = the trailing drawdown halt below.
+campaign:
+  target: 1000000               # $1M goal
+  # start_capital: null         # defaults to your current book value at startup
+  started: "2026-09-05"
+  deadline: "2027-12-31"        # exit before the anticipated 2028 chip down-cycle
+  focus_symbols: [MRVL, NVDA, TSLA]   # the names you want to play
+  trailing_drawdown_halt: 0.20  # HALT all trading if the book falls >20% from its peak

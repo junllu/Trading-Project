@@ -19,6 +19,7 @@ from .analytics import ConvictionEngine
 from .analytics.technical import technical_score
 from .brokers import build_brokers
 from .brokers.base import BrokerBase
+from .campaign import Campaign
 from .config import Settings, TradingMode, settings as global_settings
 from .data import MarketData
 from .engine import Executor, RiskManager
@@ -58,6 +59,7 @@ class Portal:
     conviction: ConvictionEngine = field(default_factory=ConvictionEngine)
     daily_agent: Optional[DailyAgent] = None
     scheduler: Optional[DailyScheduler] = None
+    campaign: Optional[Campaign] = None
     strategy_runs: list[StrategyRun] = field(default_factory=list)
     signal_log: list[Signal] = field(default_factory=list)
     held_symbols: list[str] = field(default_factory=list)
@@ -125,7 +127,33 @@ class Portal:
             execute=agent_cfg.get("execute", True),
         )
         self.scheduler = DailyScheduler(self.daily_agent.run, at=agent_cfg.get("run_at", "09:00"))
+
+        # Campaign: the mission (grow existing capital to a target by a deadline).
+        camp_cfg = self.settings.raw.get("campaign", {}) or {}
+        book = self._book_value()
+        self.campaign = Campaign(
+            start_capital=float(camp_cfg.get("start_capital") or book or 100_000),
+            target=float(camp_cfg.get("target", 1_000_000)),
+            started=camp_cfg.get("started", time.strftime("%Y-%m-%d")),
+            deadline=camp_cfg.get("deadline", "2027-12-31"),
+            focus_symbols=[s.upper() for s in camp_cfg.get("focus_symbols", ["MRVL", "NVDA", "TSLA"])],
+            trailing_drawdown_halt=float(camp_cfg.get("trailing_drawdown_halt", 0.20)),
+        )
+        self.campaign.update_hwm(book)
         return self
+
+    def _book_value(self) -> float:
+        """Investable book value = market value of real positions (excludes the
+        simulated paper cash). This is what the campaign tracks."""
+        paper = self.brokers.get("paper")
+        if paper is None:
+            return 0.0
+        total = 0.0
+        for p in paper.get_positions():
+            q = self.market.last(p.symbol)
+            price = q.price if q else paper.get_quote(p.symbol).price
+            total += p.quantity * price
+        return total
 
     def ensure_built(self) -> "Portal":
         """Build on first use if startup hasn't run yet (e.g. tests, cold API hit)."""
@@ -139,6 +167,10 @@ class Portal:
         symbols = self._all_symbols()
         quotes = self.market.refresh(symbols)
         prices = {s: q.price for s, q in quotes.items()}
+
+        # Capital-preservation guardrail runs first: a drawdown breach halts all
+        # execution before any new signal is evaluated.
+        self.enforce_campaign()
 
         fired: list[Signal] = []
         assert self.executor is not None
@@ -162,9 +194,28 @@ class Portal:
     def _all_symbols(self) -> list[str]:
         syms = set(self.settings.watchlist)
         syms.update(self.held_symbols)
+        if self.campaign is not None:
+            syms.update(self.campaign.focus_symbols)
         for run in self.strategy_runs:
             syms.update(run.symbols)
         return sorted(syms)
+
+    # campaign guardrails ---------------------------------------------------
+    def campaign_status(self) -> dict[str, Any]:
+        self.ensure_built()
+        return self.campaign.status(self._book_value()).to_dict()
+
+    def enforce_campaign(self) -> bool:
+        """Update the high-water mark and trip the kill-switch on a drawdown
+        breach. Returns True if the guardrail halted trading."""
+        self.ensure_built()
+        st = self.campaign.status(self._book_value())
+        if st.breached and not self.executor.killed:
+            log.warning("CAMPAIGN DRAWDOWN HALT: %.1f%% below peak — engaging kill-switch",
+                        st.drawdown_pct)
+            self.executor.kill()
+            return True
+        return st.breached
 
     # analytics + daily agent ----------------------------------------------
     def analytics(self) -> dict[str, Any]:
@@ -302,6 +353,7 @@ class Portal:
             "held_symbols": self.held_symbols,
             "analyst": {"live": self.analyst.live, "model": self.analyst.model},
             "schedule": self.scheduler.status() if self.scheduler else {},
+            "campaign": self.campaign.status(self._book_value()).to_dict() if self.campaign else {},
         }
 
     @staticmethod

@@ -85,6 +85,13 @@ def agent_schedule_stop():
     return portal.ensure_built().stop_schedule()
 
 
+# --- campaign (mission to $1M) ---------------------------------------------
+@router.get("/campaign")
+def campaign():
+    """Progress toward the target, pace, drawdown guardrail, and exit clock."""
+    return portal.ensure_built().campaign_status()
+
+
 # --- kill switch -----------------------------------------------------------
 @router.post("/kill")
 def kill():

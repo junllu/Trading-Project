@@ -39,6 +39,7 @@ class DailyReport:
     geo: dict = field(default_factory=dict)
     actions: list[dict] = field(default_factory=list)          # orders acted on
     option_plans: dict = field(default_factory=dict)
+    campaign: dict = field(default_factory=dict)
     summary: str = ""
 
     def to_dict(self) -> dict:
@@ -46,6 +47,7 @@ class DailyReport:
             "ts": self.ts,
             "generated": time.strftime("%Y-%m-%d %H:%M", time.localtime(self.ts)),
             "mode": self.mode,
+            "campaign": self.campaign,
             "summary": self.summary,
             "analyst_note": self.analyst_note,
             "analyst_source": self.analyst_source,
@@ -119,9 +121,14 @@ class DailyAgent:
             convictions.append(conv)
         convictions = self.conviction.rank(convictions)
 
-        # 6. size + route orders
+        # 6. size + route orders (campaign doctrine applies)
+        camp = p.campaign
+        halted = p.enforce_campaign()                       # drawdown halt trips kill-switch
+        focus = set(camp.focus_symbols) if camp else set()
+        derisk = camp.derisk_factor() if camp else 1.0
+        from ..models import Side
         actions: list[dict] = []
-        if self.execute:
+        if self.execute and not halted:
             for conv in convictions:
                 sig = conviction_to_signal(
                     conv.symbol, conv.score, p.market.history(conv.symbol),
@@ -131,21 +138,30 @@ class DailyAgent:
                 )
                 if sig is None:
                     continue
+                # Concentration: only OPEN new longs in the focus names; sells
+                # (trims to fund the focus / cut losers) are allowed anywhere.
+                if sig.side is Side.BUY and focus and conv.symbol not in focus:
+                    continue
+                # Exit clock: scale position size down as the deadline approaches.
+                sig.order_value *= derisk
+                if sig.order_value <= 0:
+                    continue
                 p.signal_log.append(sig)
                 result = p.executor.handle_signal(sig, prices.get(conv.symbol, 0.0))
                 actions.append({
                     "symbol": conv.symbol, "side": sig.side.value,
-                    "conviction": round(conv.score, 3),
+                    "conviction": round(conv.score, 3), "focus": conv.symbol in focus,
                     "status": result.order.status.value, "detail": result.detail,
                 })
 
         # 7. option plans + report
         option_plans = p.option_plans(days=30)
+        campaign = camp.status(p._book_value()).to_dict() if camp else {}
         report = DailyReport(
             ts=time.time(), mode=p.settings.mode.value,
             convictions=[c.to_dict() for c in convictions],
             analyst_note=analyst.portfolio_note, analyst_source=analyst.source,
-            geo=geo, actions=actions, option_plans=option_plans,
+            geo=geo, actions=actions, option_plans=option_plans, campaign=campaign,
         )
         report.summary = self._summary(report, convictions)
         self.last_report = report
@@ -156,7 +172,16 @@ class DailyAgent:
         buys = [c.symbol for c in convictions if c.action in ("buy", "strong_buy")]
         sells = [c.symbol for c in convictions if c.action in ("sell", "strong_sell")]
         tilt = report.geo.get("risk_tilt", "neutral")
-        parts = [f"Risk tilt: {tilt}."]
+        parts = []
+        c = report.campaign
+        if c:
+            if c.get("breached"):
+                parts.append(f"⛔ CAMPAIGN HALT ({c['drawdown_pct']:.0f}% drawdown).")
+            else:
+                parts.append(f"${c['equity']:,.0f} → $1M ({c['progress_pct']:.0f}%), "
+                             f"{c['days_remaining']}d left, needs {c['required_cagr_pct']:.0f}%/yr, "
+                             f"pace {c['pace']}.")
+        parts.append(f"Risk tilt: {tilt}.")
         if buys:
             parts.append(f"Bullish: {', '.join(buys[:6])}.")
         if sells:
