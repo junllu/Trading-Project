@@ -51,12 +51,15 @@ class CampaignStatus:
     note: str = ""
 
     def to_dict(self) -> dict:
+        def _f(x: float, nd: int) -> float:
+            # JSON-safe: never emit inf/nan (breaks browser JSON.parse).
+            return round(x, nd) if isinstance(x, (int, float)) and math.isfinite(x) else 0.0
         return {
-            "equity": round(self.equity, 2),
+            "equity": _f(self.equity, 2),
             "target": self.target,
-            "progress": round(self.progress, 4),
-            "progress_pct": round(self.progress * 100, 1),
-            "multiple_remaining": round(self.multiple_remaining, 2),
+            "progress": _f(self.progress, 4),
+            "progress_pct": _f(self.progress * 100, 1),
+            "multiple_remaining": _f(self.multiple_remaining, 2),
             "high_water_mark": round(self.high_water_mark, 2),
             "drawdown": round(self.drawdown, 4),
             "drawdown_pct": round(self.drawdown * 100, 1),
@@ -109,7 +112,7 @@ class Campaign:
 
     def required_total_return(self, equity: float) -> float:
         if equity <= 0:
-            return float("inf")
+            return 0.0                       # undefined with no capital; keep JSON-safe
         return max(0.0, self.target / equity - 1.0)
 
     def required_cagr(self, equity: float, now: date | None = None) -> float:
@@ -161,7 +164,7 @@ class Campaign:
         st = CampaignStatus(
             equity=equity, target=self.target,
             progress=equity / self.target if self.target else 0.0,
-            multiple_remaining=self.target / equity if equity > 0 else float("inf"),
+            multiple_remaining=self.target / equity if equity > 0 else 0.0,
             high_water_mark=self.high_water_mark, drawdown=dd,
             drawdown_halt=self.trailing_drawdown_halt, breached=breached,
             days_remaining=self.days_remaining(now),

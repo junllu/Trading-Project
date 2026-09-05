@@ -6,6 +6,7 @@ config/holdings.yaml
 secrets/
 data/*.db
 data/*.sqlite
+data/trade_plan.json
 
 # Python
 __pycache__/

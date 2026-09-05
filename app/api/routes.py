@@ -75,6 +75,13 @@ def agent_report():
     return portal.ensure_built().last_report()
 
 
+@router.post("/agent/plan")
+def agent_plan():
+    """Emit a trade plan (order intents + guardrails) to data/trade_plan.json
+    for execution through the Robinhood MCP by the local Claude."""
+    return portal.ensure_built().build_trade_plan()
+
+
 @router.post("/agent/schedule/start")
 def agent_schedule_start():
     return portal.ensure_built().start_schedule()

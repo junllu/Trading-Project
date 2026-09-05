@@ -231,6 +231,12 @@ class Portal:
         self.ensure_built()
         return self.daily_agent.run().to_dict()
 
+    def build_trade_plan(self) -> dict[str, Any]:
+        """Emit a trade plan (order intents + guardrails) for execution through
+        the Robinhood MCP by the local Claude. Writes data/trade_plan.json."""
+        self.ensure_built()
+        return self.daily_agent.build_plan(write=True)
+
     def last_report(self) -> dict[str, Any]:
         self.ensure_built()
         rep = self.daily_agent.last_report

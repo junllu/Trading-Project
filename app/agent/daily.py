@@ -18,12 +18,14 @@ every order still passes the risk gate and the kill-switch.
 """
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
 from typing import Any
 
 from ..analytics import ConvictionEngine
 from ..analytics.technical import technical_score
+from ..config import ROOT
 from ..analysis import rsi
 from ..engine.sizing import SizingParams, conviction_to_signal
 from ..intel.claude_analyst import ClaudeAnalyst
@@ -69,25 +71,22 @@ class DailyAgent:
         self.execute = execute
         self.last_report: DailyReport | None = None
 
-    def run(self) -> DailyReport:
+    def _analyze(self) -> dict[str, Any]:
+        """Shared analysis pipeline: quotes -> technicals -> events -> analyst
+        -> blended, ranked conviction. Used by both run() and build_plan()."""
         p = self.portal
         p.ensure_built()
         symbols = p.held_symbols or p._all_symbols()
 
-        # 1. quotes
         quotes = p.market.refresh(symbols)
         prices = {s: q.price for s, q in quotes.items()}
-
-        # 2. technicals
         techs = {s: technical_score(s, p.market.history(s)) for s in symbols}
 
-        # 3. events + geopolitics
         brief = p.intel.briefing(symbols)
         geo = brief.geo
         sentiment = brief.symbol_sentiment
         geo_bias = geo.get("ticker_bias", {})
 
-        # 4. analyst (Claude or heuristic)
         positions = {pos.symbol: pos for pos in p.brokers["paper"].get_positions()} \
             if "paper" in p.brokers else {}
         symbol_data: list[dict[str, Any]] = []
@@ -108,7 +107,6 @@ class DailyAgent:
             })
         analyst = self.analyst.analyze(symbol_data)
 
-        # 5. blend conviction
         convictions = []
         for s in symbols:
             inputs = {
@@ -120,6 +118,16 @@ class DailyAgent:
             conv = self.conviction.blend(s, {k: v for k, v in inputs.items() if v is not None})
             convictions.append(conv)
         convictions = self.conviction.rank(convictions)
+        return {"symbols": symbols, "prices": prices, "techs": techs, "brief": brief,
+                "geo": geo, "analyst": analyst, "convictions": convictions, "positions": positions}
+
+    def run(self) -> DailyReport:
+        p = self.portal
+        ctx = self._analyze()
+        prices = ctx["prices"]
+        geo = ctx["geo"]
+        analyst = ctx["analyst"]
+        convictions = ctx["convictions"]
 
         # 6. size + route orders (campaign doctrine applies)
         camp = p.campaign
@@ -166,6 +174,104 @@ class DailyAgent:
         report.summary = self._summary(report, convictions)
         self.last_report = report
         return report
+
+    def build_plan(self, write: bool = True) -> dict[str, Any]:
+        """Produce a TRADE PLAN for execution through the Robinhood MCP.
+
+        Emits order *intents* (not paper fills) with the campaign guardrails and
+        the exact limits the executor must honor. Written to data/trade_plan.json
+        for the local Claude (with the robinhood-trading MCP) to read, verify
+        against the live account, present for approval, and execute.
+        """
+        from ..models import Side
+        p = self.portal
+        ctx = self._analyze()
+        prices, convictions, positions = ctx["prices"], ctx["convictions"], ctx["positions"]
+
+        camp = p.campaign
+        book = p._book_value()
+        camp_status = camp.status(book).to_dict() if camp else {}
+        halted = camp.breached(book) if camp else False
+        focus = set(camp.focus_symbols) if camp else set()
+        derisk = camp.derisk_factor() if camp else 1.0
+        limits = p.risk.limits
+
+        orders: list[dict] = []
+        if not halted and not p.executor.killed:
+            for conv in convictions:
+                sig = conviction_to_signal(conv.symbol, conv.score, p.market.history(conv.symbol),
+                                           params=self.sizing)
+                if sig is None:
+                    continue
+                if sig.side is Side.BUY and focus and conv.symbol not in focus:
+                    continue                                  # concentration: buys only in focus names
+                sig.order_value = round(sig.order_value * derisk, 2)   # exit-clock scaling
+                if sig.order_value <= 0:
+                    continue
+                px = prices.get(conv.symbol, 0.0)
+                held = positions.get(conv.symbol)
+                notes: list[str] = []
+                if conv.symbol in focus:
+                    notes.append("focus name")
+                if sig.side is Side.SELL and held is None:
+                    notes.append("no shares held — SKIP (verify live account)")
+                if sig.side is Side.BUY:
+                    held_val = (held.quantity * px) if held else 0.0
+                    if held_val + sig.order_value > limits.max_position_value:
+                        notes.append(f"would exceed max position ${limits.max_position_value:,.0f} — trim size")
+                if sig.order_value > limits.max_order_value:
+                    sig.order_value = limits.max_order_value
+                    notes.append(f"capped at max order ${limits.max_order_value:,.0f}")
+                orders.append({
+                    "symbol": conv.symbol, "side": sig.side.value,
+                    "order_value": sig.order_value,
+                    "est_shares": round(sig.order_value / px, 4) if px else None,
+                    "limit_or_market": "market",
+                    "conviction": round(conv.score, 3), "action": conv.action,
+                    "focus": conv.symbol in focus,
+                    "held_shares": held.quantity if held else 0,
+                    "rationale": conv.to_dict().get("contributions", {}),
+                    "guardrail_notes": notes,
+                })
+
+        plan = {
+            "generated": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
+            "mode": p.settings.mode.value,
+            "campaign": camp_status,
+            "guardrails": {
+                "drawdown_halt_active": halted,
+                "kill_switch": p.executor.killed,
+                "phase": camp.phase() if camp else "n/a",
+                "derisk_factor": round(derisk, 3),
+                "requires_human_approval": True,
+            },
+            "limits": {
+                "max_order_value": limits.max_order_value,
+                "max_position_value": limits.max_position_value,
+                "max_orders_per_day": limits.max_orders_per_day,
+                "max_daily_loss": limits.max_daily_loss,
+                "trailing_drawdown_halt_pct": camp_status.get("drawdown_halt_pct"),
+                "focus_symbols": sorted(focus),
+            },
+            "orders": orders,
+            "executor_instructions": (
+                "Execute ONLY the orders listed, as MARKET orders, through the robinhood-trading MCP. "
+                "First read the live account and positions; verify each order against them "
+                "(skip any SELL for shares not actually held). Show the user the full plan and get "
+                "explicit approval before placing anything. If drawdown_halt_active or kill_switch is "
+                "true, place NOTHING. Never exceed the limits above. Report every fill back to the user."
+            ),
+        }
+        if halted:
+            plan["executor_instructions"] = ("HALT: campaign drawdown breached. Place NO orders. "
+                                             "Preserve capital and alert the user.")
+
+        if write:
+            path = ROOT / "data" / "trade_plan.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+            plan["_written_to"] = str(path)
+        return plan
 
     @staticmethod
     def _summary(report: DailyReport, convictions) -> str:
