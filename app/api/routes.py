@@ -36,6 +36,26 @@ def quotes():
     return {s: q.price for s, q in portal.market.refresh(symbols).items()}
 
 
+# --- intelligence layer ----------------------------------------------------
+@router.get("/intel")
+def intel(force: bool = False, use_x: bool = False):
+    """Current events briefing: Grok live-search + geopolitical assessment."""
+    return portal.ensure_built().intel_briefing(force=force, use_x=use_x)
+
+
+@router.get("/intel/ask")
+def intel_ask(q: str):
+    """Free-form geopolitical / market question to Grok (live if XAI_API_KEY set)."""
+    return {"question": q, "answer": portal.ensure_built().intel.grok.ask(q)}
+
+
+# --- options plans ---------------------------------------------------------
+@router.get("/options/plans")
+def options_plans(days: int = 30):
+    """Covered-call, cash-secured-put, and sell-the-news suggestions for review."""
+    return portal.ensure_built().option_plans(days=days)
+
+
 # --- kill switch -----------------------------------------------------------
 @router.post("/kill")
 def kill():

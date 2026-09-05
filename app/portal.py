@@ -18,8 +18,15 @@ from .brokers.base import BrokerBase
 from .config import Settings, TradingMode, settings as global_settings
 from .data import MarketData
 from .engine import Executor, RiskManager
+from .intel import IntelService
 from .models import Signal
+from .options import (
+    cash_secured_put_candidates,
+    covered_call_candidates,
+    sell_the_news_plan,
+)
 from .portfolio import PortfolioService
+from .portfolio.holdings import load_holdings, seed_paper_broker
 from .strategy import build_strategy
 from .strategy.base import Strategy, StrategyContext
 
@@ -40,8 +47,10 @@ class Portal:
     risk: Optional[RiskManager] = None
     executor: Optional[Executor] = None
     portfolio: Optional[PortfolioService] = None
+    intel: IntelService = field(default_factory=IntelService)
     strategy_runs: list[StrategyRun] = field(default_factory=list)
     signal_log: list[Signal] = field(default_factory=list)
+    held_symbols: list[str] = field(default_factory=list)
 
     _thread: Optional[threading.Thread] = None
     _stop: threading.Event = field(default_factory=threading.Event)
@@ -67,6 +76,13 @@ class Portal:
         # Connect paper immediately; live brokers connect lazily on first order.
         if paper is not None and not paper.is_connected():
             paper.connect()
+
+        # Seed the real holdings snapshot into the paper broker (until live sync).
+        self.held_symbols = []
+        if paper is not None:
+            holdings = load_holdings()
+            if holdings:
+                self.held_symbols = seed_paper_broker(paper, holdings)
 
         self.strategy_runs = []
         for spec in self.settings.strategies:
@@ -111,9 +127,55 @@ class Portal:
     # helpers ---------------------------------------------------------------
     def _all_symbols(self) -> list[str]:
         syms = set(self.settings.watchlist)
+        syms.update(self.held_symbols)
         for run in self.strategy_runs:
             syms.update(run.symbols)
         return sorted(syms)
+
+    # intelligence + options -----------------------------------------------
+    def intel_briefing(self, force: bool = False, use_x: bool = False) -> dict[str, Any]:
+        universe = self.held_symbols or self._all_symbols()
+        return self.intel.briefing(universe, force=force, use_x=use_x).to_dict()
+
+    def option_plans(self, days: int = 30) -> dict[str, Any]:
+        """Covered calls on real lots, CSPs from cash, sell-the-news on events."""
+        self.ensure_built()
+        paper = self.brokers.get("paper")
+        positions = paper.get_positions() if paper else []
+        # Prefer the latest tick, then the broker's seeded last price, then cost.
+        prices: dict[str, float] = {}
+        for p in positions:
+            last = self.market.last(p.symbol)
+            if last is not None:
+                prices[p.symbol] = last.price
+            elif paper is not None:
+                prices[p.symbol] = paper.get_quote(p.symbol).price
+            else:
+                prices[p.symbol] = p.avg_price
+
+        covered = covered_call_candidates(positions, prices, days=days)
+        cash = paper.get_account().cash if paper else 0.0
+        csp = cash_secured_put_candidates(
+            self.held_symbols or self.settings.watchlist, prices, cash, days=days,
+        )
+
+        # sell-the-news: cross real holdings with the latest intel sentiment
+        brief = self.intel.briefing(self.held_symbols or self._all_symbols())
+        stn = []
+        held = {p.symbol: p.quantity for p in positions}
+        for sym, score in brief.symbol_sentiment.items():
+            plan = sell_the_news_plan(
+                sym, prices.get(sym, 0.0), score, held.get(sym, 0.0),
+                importance=0.7,
+            )
+            if plan:
+                stn.append(plan.to_dict())
+
+        return {
+            "covered_calls": [p.to_dict() for p in covered],
+            "cash_secured_puts": [p.to_dict() for p in csp],
+            "sell_the_news": stn,
+        }
 
     def _position_qty(self, symbol: str) -> float:
         if self.portfolio is None:
@@ -152,7 +214,16 @@ class Portal:
     def status(self) -> dict[str, Any]:
         self.ensure_built()
         assert self.executor is not None and self.risk is not None
-        prices = {s: (q.price if (q := self.market.last(s)) else 0.0) for s in self._all_symbols()}
+        paper = self.brokers.get("paper")
+        prices: dict[str, float] = {}
+        for s in self._all_symbols():
+            last = self.market.last(s)
+            if last is not None:
+                prices[s] = last.price
+            elif paper is not None:
+                prices[s] = paper.get_quote(s).price   # seeded last price, not 0
+            else:
+                prices[s] = 0.0
         snap = self.portfolio.snapshot(prices) if self.portfolio else {}
         return {
             "mode": self.settings.mode.value,
@@ -164,6 +235,8 @@ class Portal:
             "recent_orders": [self._order_dict(o) for o in self.executor.history[-25:][::-1]],
             "recent_signals": [self._signal_dict(s) for s in self.signal_log[-25:][::-1]],
             "watchlist": [{"symbol": s, "price": prices.get(s, 0.0)} for s in self._all_symbols()],
+            "intel_sources": self.intel.sources_live,
+            "held_symbols": self.held_symbols,
         }
 
     @staticmethod

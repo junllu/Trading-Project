@@ -127,6 +127,50 @@
         <tbody id="signals"></tbody></table>
       <div class="empty" id="signalsEmpty">No signals yet.</div>
     </section>
+
+    <!-- ===================== INTELLIGENCE & OPTIONS ===================== -->
+    <section class="card col-12" style="border-color:#2c3a52;">
+      <h2>🌐 Geopolitical Assessment
+        <span class="pill" id="intelSources" style="margin-left:8px;">sources: —</span>
+      </h2>
+      <div class="kpis" style="margin-bottom:10px;">
+        <div><div class="stat" id="riskTilt">—</div><div class="stat sub">Risk Tilt</div></div>
+        <div><div class="stat" id="geoConf">—</div><div class="stat sub">Confidence</div></div>
+        <div style="flex:1;min-width:240px;">
+          <div class="stat sub" style="margin-bottom:4px;">Themes detected</div>
+          <div id="geoThemes" class="muted">—</div>
+        </div>
+      </div>
+      <div id="geoRationale" class="muted" style="font-size:12px;"></div>
+    </section>
+
+    <section class="card col-6">
+      <h2>📰 Live Events <span class="muted" style="font-weight:400;text-transform:none;">(Grok live-search / mock)</span></h2>
+      <table><thead><tr><th>Headline</th><th>Cat</th><th class="num">Sent</th></tr></thead>
+        <tbody id="events"></tbody></table>
+      <div class="empty" id="eventsEmpty">No events.</div>
+    </section>
+
+    <section class="card col-6">
+      <h2>💵 Covered Calls <span class="muted" style="font-weight:400;text-transform:none;">(on your 100-sh lots)</span></h2>
+      <table><thead><tr><th>Sym</th><th>Contracts</th><th class="num">Strike</th><th class="num">Credit</th><th class="num">Ann.%</th></tr></thead>
+        <tbody id="coveredCalls"></tbody></table>
+      <div class="empty" id="ccEmpty">No 100-share lots to write against.</div>
+    </section>
+
+    <section class="card col-6">
+      <h2>🅿️ Cash-Secured Puts <span class="muted" style="font-weight:400;text-transform:none;">(get paid to buy lower)</span></h2>
+      <table><thead><tr><th>Sym</th><th>Contracts</th><th class="num">Strike</th><th class="num">Credit</th><th class="num">Ann.%</th></tr></thead>
+        <tbody id="csps"></tbody></table>
+      <div class="empty" id="cspEmpty">No cash-covered puts available.</div>
+    </section>
+
+    <section class="card col-6">
+      <h2>📉 Sell the News <span class="muted" style="font-weight:400;text-transform:none;">(event-driven)</span></h2>
+      <tbody id="stnList"></tbody>
+      <div id="stnBody"></div>
+      <div class="empty" id="stnEmpty">No strong-sentiment events on your holdings.</div>
+    </section>
   </main>
 
   <script>
@@ -221,6 +265,8 @@
         <td class="muted">${o.reason||""}</td></tr>`).join("");
       $("ordersEmpty").hidden = ords.length>0;
 
+      window._sources = s.intel_sources || {};
+
       const sigs = s.recent_signals||[];
       $("signals").innerHTML = sigs.map(x=>`<tr><td>${x.symbol}</td>
         <td><span class="pill ${x.side}">${x.side}</span></td>
@@ -228,8 +274,67 @@
       $("signalsEmpty").hidden = sigs.length>0;
     }
 
+    const tiltClass = (t) => t==="risk_on"?"pos":(t==="risk_off"?"neg":"");
+    const sentPill = (s) => {
+      const c = s>0.15?"buy":(s<-0.15?"sell":"");
+      return `<span class="pill ${c}">${s>=0?"+":""}${s.toFixed(2)}</span>`;
+    };
+
+    async function refreshIntel(){
+      let intel, opts;
+      try {
+        intel = await (await fetch("/api/intel")).json();
+        opts  = await (await fetch("/api/options/plans")).json();
+      } catch(e){ return; }
+
+      // sources (populated from the main status poll into window._sources)
+      const src = window._sources || {};
+      const label = Object.keys(src).length
+        ? Object.entries(src).map(([k,v])=>`${k}:${v?"live":"mock"}`).join("  ")
+        : "mock";
+      $("intelSources").textContent = "sources: " + label;
+
+      // geo
+      const geo = intel.geo || {};
+      $("riskTilt").textContent = (geo.risk_tilt||"—").replace("_"," ");
+      $("riskTilt").className = "stat "+tiltClass(geo.risk_tilt);
+      $("geoConf").textContent = geo.confidence!=null ? Math.round(geo.confidence*100)+"%" : "—";
+      $("geoThemes").innerHTML = (geo.matched_themes||[]).map(t=>`<span class="pill" style="margin:2px;">${t.replace(/_/g," ")}</span>`).join("") || "—";
+      $("geoRationale").innerHTML = (geo.rationale||[]).map(r=>"• "+r).join("<br>");
+
+      // events
+      const evs = intel.events || [];
+      $("events").innerHTML = evs.map(e=>`<tr>
+        <td title="${e.headline}">${e.headline.length>52?e.headline.slice(0,52)+"…":e.headline}</td>
+        <td class="muted">${e.category}</td>
+        <td class="num">${sentPill(e.sentiment_score)}</td></tr>`).join("");
+      $("eventsEmpty").hidden = evs.length>0;
+
+      // covered calls
+      const cc = (opts.covered_calls||[]);
+      $("coveredCalls").innerHTML = cc.map(p=>`<tr><td>${p.symbol}</td><td class="num">${p.contracts}</td>
+        <td class="num">$${p.strike}</td><td class="num pos">$${Math.round(p.est_premium)}</td>
+        <td class="num">${(p.annualized_return*100).toFixed(0)}%</td></tr>`).join("");
+      $("ccEmpty").hidden = cc.length>0;
+
+      // CSPs
+      const cs = (opts.cash_secured_puts||[]).slice(0,8);
+      $("csps").innerHTML = cs.map(p=>`<tr><td>${p.symbol}</td><td class="num">${p.contracts}</td>
+        <td class="num">$${p.strike}</td><td class="num pos">$${Math.round(p.est_premium)}</td>
+        <td class="num">${(p.annualized_return*100).toFixed(0)}%</td></tr>`).join("");
+      $("cspEmpty").hidden = cs.length>0;
+
+      // sell the news
+      const stn = (opts.sell_the_news||[]);
+      $("stnBody").innerHTML = stn.map(p=>`<div style="padding:6px 0;border-bottom:1px solid var(--line);">
+        <b>${p.symbol}</b> <span class="muted">${p.action}</span></div>`).join("");
+      $("stnEmpty").hidden = stn.length>0;
+    }
+
     refresh();
+    refreshIntel();
     setInterval(refresh, 4000);
+    setInterval(refreshIntel, 30000);
   </script>
 </body>
 </html>

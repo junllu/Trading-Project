@@ -1,6 +1,7 @@
 # Secrets & config
 .env
 config/config.yaml
+config/holdings.yaml
 *.key
 secrets/
 data/*.db

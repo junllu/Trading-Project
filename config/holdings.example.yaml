@@ -1,0 +1,11 @@
+# Your real holdings snapshot. Copy to config/holdings.yaml (git-ignored) and
+# keep it current, OR — better — connect live Robinhood/Webull sync so this is
+# pulled automatically. The portal loads these into the portfolio view and runs
+# the intel, geopolitical, and options engines against them.
+#
+# Each entry: symbol, shares, avg_price (your cost), last (current price),
+# broker (label only). Options strategies need the share count; covered calls
+# require 100+ share lots.
+
+holdings:
+  - {symbol: EXAMPLE, shares: 100, avg_price: 50.00, last: 55.00, broker: robinhood}
