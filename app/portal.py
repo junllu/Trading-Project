@@ -127,6 +127,8 @@ class Portal:
         agent_cfg = self.settings.raw.get("agent", {}) or {}
         weights = agent_cfg.get("conviction_weights")
         self.conviction = ConvictionEngine(weights)
+        from .intel.analyst import build_analyst
+        self.analyst = build_analyst(agent_cfg.get("analyst_provider"), agent_cfg.get("analyst_model"))
         forecaster = build_forecaster(agent_cfg.get("forecast_model", "naive"))
         self.daily_agent = DailyAgent(
             self, analyst=self.analyst, conviction=self.conviction,

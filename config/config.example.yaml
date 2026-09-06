@@ -54,6 +54,12 @@ agent:
   #   chronos   — Amazon Chronos (HF)      chronos-2 | timesfm | kronos also accepted
   # HF models need `pip install` + a weight download and run locally. See docs/ML.md.
   forecast_model: naive
+  # The analyst agent's brain:
+  #   heuristic  — no LLM (default, free)
+  #   anthropic  — Claude API (needs ANTHROPIC_API_KEY)
+  #   ollama     — a LOCAL model you run yourself (free, private). See docs/AGENTS.md
+  analyst_provider: heuristic
+  analyst_model: llama3.1        # used when analyst_provider: ollama
   sizing:
     base_budget: 1000      # $ per order at full conviction, average volatility
     entry_threshold: 0.2   # skip trades weaker than this |conviction|
