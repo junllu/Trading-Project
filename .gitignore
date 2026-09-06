@@ -28,3 +28,4 @@ dist/
 *.log
 data/prices/
 data/history.db
+data/trade_history.json
