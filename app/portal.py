@@ -26,6 +26,7 @@ from .engine import Executor, RiskManager
 from .engine.sizing import SizingParams
 from .intel import IntelService
 from .intel.claude_analyst import ClaudeAnalyst
+from .ml import build_forecaster
 from .models import Signal
 from .options import (
     cash_secured_put_candidates,
@@ -126,10 +127,11 @@ class Portal:
         agent_cfg = self.settings.raw.get("agent", {}) or {}
         weights = agent_cfg.get("conviction_weights")
         self.conviction = ConvictionEngine(weights)
+        forecaster = build_forecaster(agent_cfg.get("forecast_model", "naive"))
         self.daily_agent = DailyAgent(
             self, analyst=self.analyst, conviction=self.conviction,
             sizing=SizingParams(**(agent_cfg.get("sizing", {}) or {})),
-            execute=agent_cfg.get("execute", True),
+            execute=agent_cfg.get("execute", True), forecaster=forecaster,
         )
         self.scheduler = DailyScheduler(self.daily_agent.run, at=agent_cfg.get("run_at", "09:00"))
 

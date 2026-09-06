@@ -49,6 +49,11 @@ loop_interval_seconds: 60
 agent:
   run_at: "09:00"          # local time to fire the daily routine
   execute: true            # route conviction orders through the executor (mode-aware)
+  # Forward-return forecaster feeding the "forecast" conviction source.
+  #   naive     — pure-Python drift/significance estimate (default, no deps)
+  #   chronos   — Amazon Chronos (HF)      chronos-2 | timesfm | kronos also accepted
+  # HF models need `pip install` + a weight download and run locally. See docs/ML.md.
+  forecast_model: naive
   sizing:
     base_budget: 1000      # $ per order at full conviction, average volatility
     entry_threshold: 0.2   # skip trades weaker than this |conviction|

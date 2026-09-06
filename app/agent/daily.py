@@ -63,12 +63,15 @@ class DailyReport:
 class DailyAgent:
     def __init__(self, portal, analyst: ClaudeAnalyst | None = None,
                  conviction: ConvictionEngine | None = None,
-                 sizing: SizingParams | None = None, execute: bool = True):
+                 sizing: SizingParams | None = None, execute: bool = True,
+                 forecaster=None):
+        from ..ml import build_forecaster
         self.portal = portal
         self.analyst = analyst or ClaudeAnalyst()
         self.conviction = conviction or ConvictionEngine()
         self.sizing = sizing or SizingParams()
         self.execute = execute
+        self.forecaster = forecaster or build_forecaster("naive")
         self.last_report: DailyReport | None = None
 
     def _analyze(self) -> dict[str, Any]:
@@ -109,8 +112,10 @@ class DailyAgent:
 
         convictions = []
         for s in symbols:
+            fc = self.forecaster.predict(s, p.market.history(s))
             inputs = {
                 "technical": techs[s].score if techs[s].ready else None,
+                "forecast": fc.score() if fc.confidence > 0 else None,
                 "analyst": analyst.ratings.get(s),
                 "sentiment": sentiment.get(s),
                 "geopolitical": geo_bias.get(s),

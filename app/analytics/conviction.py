@@ -21,8 +21,9 @@ from dataclasses import dataclass, field
 # Default source weights. Tune to your trust in each. They need not sum to 1;
 # the engine normalizes over whichever sources are present for a symbol.
 DEFAULT_WEIGHTS: dict[str, float] = {
-    "technical": 0.30,
-    "analyst": 0.30,
+    "technical": 0.25,
+    "forecast": 0.20,          # ML forward-return forecast (naive or Hugging Face model)
+    "analyst": 0.25,
     "sentiment": 0.15,
     "geopolitical": 0.10,
     "serenity": 0.05,
