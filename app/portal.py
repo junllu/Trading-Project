@@ -239,6 +239,35 @@ class Portal:
         self.ensure_built()
         return self.daily_agent.run().to_dict()
 
+    def allocation_plan(self) -> dict[str, Any]:
+        """Tiered 'pockets' barbell: assign the configured $ ladder to ranked
+        opportunities (core = risk-adjusted conviction, gems = high upside)."""
+        self.ensure_built()
+        from .engine.sizing import realized_vol
+        from .portfolio.pockets import Candidate, PocketAllocator
+        ctx = self.daily_agent._analyze()
+        convs = {c.symbol: c for c in ctx["convictions"]}
+        cfg = self.settings.raw.get("allocation", {}) or {}
+        pockets = cfg.get("pockets", [30000, 20000, 10000, 10000, 5000, 1000, 1000, 1000, 1000, 1000])
+        fund = float(cfg.get("fund") or self._book_value() or sum(pockets))
+        candidates = []
+        for s in self._all_symbols():
+            conv = convs.get(s)
+            if conv is None:
+                continue
+            hist = self.market.history(s)
+            fc = self.daily_agent.forecaster.predict(s, hist)
+            candidates.append(Candidate(
+                symbol=s, conviction=conv.score,
+                upside=max(0.0, fc.expected_return), risk=min(1.0, realized_vol(hist)),
+            ))
+        allocator = PocketAllocator(pockets, total=fund, gem_threshold=cfg.get("gem_threshold", 2000))
+        return allocator.allocate(candidates).to_dict()
+
+    def macro_view(self, as_of: str | None = None) -> dict[str, Any]:
+        from .macro import MacroEngine
+        return MacroEngine().view(as_of).to_dict()
+
     def build_trade_plan(self) -> dict[str, Any]:
         """Emit a trade plan (order intents + guardrails) for execution through
         the Robinhood MCP by the local Claude. Writes data/trade_plan.json."""

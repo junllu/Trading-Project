@@ -18,6 +18,7 @@ from typing import Optional
 from ..analytics import ConvictionEngine
 from ..analytics.technical import technical_score
 from ..engine.sizing import realized_vol
+from ..macro import MacroEngine
 from ..ml import build_forecaster
 from ..sim.store import SimStore
 from .data import PriceData
@@ -66,6 +67,7 @@ class Backtest:
         self.run_id = f"bt_{setup.name.split(':')[0]}_{uuid.uuid4().hex[:6]}"
         self.conviction = ConvictionEngine(setup.weights)
         self.forecaster = build_forecaster(setup.forecast_model)
+        self.macro = MacroEngine()
 
     def run(self) -> BacktestResult:
         d = self.data
@@ -151,6 +153,10 @@ class Backtest:
                 inputs["technical"] = tech.score
             if "forecast" in s_setup.weights and fc.confidence > 0:
                 inputs["forecast"] = fc.score()
+            if "macro" in s_setup.weights:
+                mb = self.macro.symbol_bias(s, self.data.dates[t])   # replay-date policy tilt
+                if abs(mb) > 0.02:
+                    inputs["macro"] = mb
             conv = self.conviction.blend(s, inputs)
             ranked.append((s, conv, hist))
         ranked.sort(key=lambda x: -x[1].score)

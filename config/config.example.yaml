@@ -80,3 +80,11 @@ campaign:
   deadline: "2027-12-31"        # exit before the anticipated 2028 chip down-cycle
   focus_symbols: [MRVL, NVDA, TSLA]   # the names you want to play
   trailing_drawdown_halt: 0.20  # HALT all trading if the book falls >20% from its peak
+
+# Tiered "pockets" allocation — a conviction barbell. Large pockets = core
+# high-conviction positions; small pockets = asymmetric "gem" bets (find gems,
+# don't chase hype). Ladder should sum to your investable fund.
+allocation:
+  fund: 80000                    # investable capital (defaults to your book value if omitted)
+  gem_threshold: 2000            # pockets below this are "gem" (upside) bets; above are "core"
+  pockets: [30000, 20000, 10000, 10000, 5000, 1000, 1000, 1000, 1000, 1000]

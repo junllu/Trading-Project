@@ -75,6 +75,18 @@ def agent_report():
     return portal.ensure_built().last_report()
 
 
+@router.get("/allocation")
+def allocation():
+    """Tiered 'pockets' allocation of the fund across ranked opportunities."""
+    return portal.ensure_built().allocation_plan()
+
+
+@router.get("/macro")
+def macro(as_of: str | None = None):
+    """Active policy-cycle regimes and sector tilts (optionally as of a date)."""
+    return portal.ensure_built().macro_view(as_of)
+
+
 @router.post("/agent/plan")
 def agent_plan():
     """Emit a trade plan (order intents + guardrails) to data/trade_plan.json

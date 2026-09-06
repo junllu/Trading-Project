@@ -25,6 +25,7 @@ DEFAULT_WEIGHTS: dict[str, float] = {
     "forecast": 0.20,          # ML forward-return forecast (naive or Hugging Face model)
     "analyst": 0.25,
     "sentiment": 0.15,
+    "macro": 0.12,             # policy-cycle / election-regime sector tilt (macro timeline)
     "geopolitical": 0.10,
     "serenity": 0.05,
     "professor_jiang": 0.05,

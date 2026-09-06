@@ -110,6 +110,10 @@ class DailyAgent:
             })
         analyst = self.analyst.analyze(symbol_data)
 
+        # Macro / policy-cycle tilt for today (current administration + active bills).
+        from ..macro import MacroEngine
+        macro = MacroEngine().symbol_biases(symbols)
+
         convictions = []
         for s in symbols:
             fc = self.forecaster.predict(s, p.market.history(s))
@@ -118,6 +122,7 @@ class DailyAgent:
                 "forecast": fc.score() if fc.confidence > 0 else None,
                 "analyst": analyst.ratings.get(s),
                 "sentiment": sentiment.get(s),
+                "macro": macro.get(s) if abs(macro.get(s, 0.0)) > 0.02 else None,
                 "geopolitical": geo_bias.get(s),
             }
             conv = self.conviction.blend(s, {k: v for k, v in inputs.items() if v is not None})

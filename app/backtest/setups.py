@@ -58,6 +58,11 @@ SETUPS: dict[str, Setup] = {
         weights={"technical": 1.0}, drawdown_halt=0.20,
         note="Isolates the forecast source's contribution vs A.",
     ),
+    "E": Setup(
+        name="E: Trend+Forecast+Macro, halt ON",
+        weights={"technical": 0.5, "forecast": 0.3, "macro": 0.2}, drawdown_halt=0.20,
+        note="Adds the policy-cycle macro tilt on top of A — tests whether regime awareness helps.",
+    ),
 }
 
 
