@@ -7,5 +7,11 @@
 # broker (label only). Options strategies need the share count; covered calls
 # require 100+ share lots.
 
+# Real uninvested cash in the account (optional). When holdings are loaded, the
+# portal uses THIS as the account cash — not a simulated buffer — so Equity shows
+# your true account value. Omit it and the portal assumes 0 real cash (never a
+# phantom $100k). /sync-holdings fills this from your live Robinhood balance.
+cash: 0
+
 holdings:
   - {symbol: EXAMPLE, shares: 100, avg_price: 50.00, last: 55.00, broker: robinhood}

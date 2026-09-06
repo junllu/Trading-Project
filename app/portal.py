@@ -33,7 +33,7 @@ from .options import (
     sell_the_news_plan,
 )
 from .portfolio import PortfolioService
-from .portfolio.holdings import load_holdings, seed_paper_broker
+from .portfolio.holdings import load_cash, load_holdings, seed_paper_broker
 from .strategy import build_strategy
 from .strategy.base import Strategy, StrategyContext
 
@@ -95,6 +95,11 @@ class Portal:
             holdings = load_holdings()
             if holdings:
                 self.held_symbols = seed_paper_broker(paper, holdings)
+                # Tracking a REAL book: use real uninvested cash (holdings.yaml
+                # `cash:`), not the simulated $100k paper default. Unknown => 0,
+                # so Equity never shows phantom money.
+                real_cash = load_cash()
+                paper.cash = float(real_cash) if real_cash is not None else 0.0
                 # Backfill a plausible cost->current price path per holding so
                 # technicals are meaningful on day one (stand-in for a data feed).
                 by_symbol: dict[str, dict] = {}
@@ -143,12 +148,13 @@ class Portal:
         return self
 
     def _book_value(self) -> float:
-        """Investable book value = market value of real positions (excludes the
-        simulated paper cash). This is what the campaign tracks."""
+        """Real account value the campaign tracks = positions market value +
+        real uninvested cash. When holdings are loaded, paper.cash is set to the
+        real cash (0 if unknown), so this is the true total — no phantom money."""
         paper = self.brokers.get("paper")
         if paper is None:
             return 0.0
-        total = 0.0
+        total = paper.cash
         for p in paper.get_positions():
             q = self.market.last(p.symbol)
             price = q.price if q else paper.get_quote(p.symbol).price
@@ -212,7 +218,7 @@ class Portal:
         st = self.campaign.status(self._book_value())
         if st.breached and not self.executor.killed:
             log.warning("CAMPAIGN DRAWDOWN HALT: %.1f%% below peak — engaging kill-switch",
-                        st.drawdown_pct)
+                        st.drawdown * 100)
             self.executor.kill()
             return True
         return st.breached

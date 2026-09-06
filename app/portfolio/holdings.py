@@ -29,6 +29,21 @@ def load_holdings(path: Path | None = None) -> list[dict]:
     return list(data.get("holdings", []))
 
 
+def load_cash(path: Path | None = None) -> float | None:
+    """Real uninvested cash from holdings.yaml (top-level `cash:`), or None.
+
+    None means "unknown" — the portal then assumes 0 real cash rather than
+    inventing paper buying power, so Equity reflects the real account.
+    """
+    p = path or HOLDINGS_PATH
+    if yaml is None or not p.exists():
+        return None
+    with p.open("r", encoding="utf-8") as fh:
+        data = yaml.safe_load(fh) or {}
+    cash = data.get("cash")
+    return float(cash) if cash is not None else None
+
+
 def seed_paper_broker(broker: PaperBroker, holdings: list[dict]) -> list[str]:
     """Load holdings into a paper broker as consolidated positions + prices.
 

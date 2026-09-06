@@ -17,6 +17,13 @@ def build_portal():
     p.held_symbols = []
     # Point the campaign's focus at the test symbols so BUY concentration allows them.
     p.campaign.focus_symbols = ["AAA", "BBB"]
+    # Ignore any real holdings.yaml on disk and give the paper test real buying power.
+    paper = p.brokers["paper"]
+    paper._positions.clear()
+    paper.cash = 100_000.0
+    # Re-anchor the campaign to the fresh book so no artificial drawdown trips.
+    p.campaign.start_capital = paper.cash
+    p.campaign.high_water_mark = paper.cash
     # seed a clean uptrend and downtrend so technicals are decisive
     p.market.seed_history("AAA", [100 + i for i in range(60)])
     p.market.seed_history("BBB", [160 - i for i in range(60)])
