@@ -55,6 +55,60 @@ class RoundTrip:
         return _days(self.buy_date, self.sell_date)
 
 
+def validate(orders: list[dict]) -> list[dict]:
+    """Flag data-quality issues that would corrupt the analysis even if the
+    analyzer runs correctly. Each warning: {level, symbol, issue}."""
+    warnings: list[dict] = []
+    by_symbol: dict[str, list[dict]] = defaultdict(list)
+    seen: set[tuple] = set()
+
+    for o in orders:
+        sym = str(o.get("symbol", "")).upper()
+        # structural checks
+        try:
+            qty = float(o["quantity"]); price = float(o["price"])
+        except (KeyError, TypeError, ValueError):
+            warnings.append({"level": "error", "symbol": sym, "issue": "missing/invalid quantity or price"})
+            continue
+        if qty <= 0 or price <= 0:
+            warnings.append({"level": "error", "symbol": sym, "issue": f"non-positive qty/price ({qty}@{price})"})
+        if not o.get("date"):
+            warnings.append({"level": "warn", "symbol": sym, "issue": "missing date (breaks holding-period + macro flags)"})
+        # option/crypto-looking symbol
+        if not sym.isalnum() or len(sym) > 6 or any(ch.isdigit() for ch in sym):
+            warnings.append({"level": "warn", "symbol": sym, "issue": "symbol looks like an option/crypto — may be mis-parsed as equity"})
+        key = (sym, o.get("side"), o.get("quantity"), o.get("price"), o.get("date"))
+        if key in seen:
+            warnings.append({"level": "warn", "symbol": sym, "issue": "exact duplicate execution"})
+        seen.add(key)
+        by_symbol[sym].append(o)
+
+    for sym, os_ in by_symbol.items():
+        prices = [float(o["price"]) for o in os_ if _num(o.get("price"))]
+        if prices and min(prices) > 0 and max(prices) / min(prices) > 8:
+            warnings.append({"level": "warn", "symbol": sym,
+                             "issue": f"price range {max(prices)/min(prices):.0f}x — likely a STOCK SPLIT; "
+                                      f"verify prices are split-adjusted before trusting P&L"})
+        # running inventory: a sell exceeding prior buys = missing history or split mismatch
+        inv = 0.0
+        for o in sorted(os_, key=lambda x: x.get("date", "")):
+            if str(o["side"]).lower() == "buy":
+                inv += float(o["quantity"])
+            elif str(o["side"]).lower() == "sell":
+                if float(o["quantity"]) > inv + 1e-6:
+                    warnings.append({"level": "warn", "symbol": sym,
+                                     "issue": f"sell exceeds prior buys on {o.get('date')} — missing early history or split"})
+                inv -= float(o["quantity"])
+    return warnings
+
+
+def _num(x) -> bool:
+    try:
+        float(x); return True
+    except (TypeError, ValueError):
+        return False
+
+
 def load_trade_history(path: Path | None = None) -> list[dict]:
     p = path or HISTORY_PATH
     if not p.exists():

@@ -41,3 +41,30 @@ def test_empty_history():
     a = analyze([])
     assert a["trades_matched"] == 0
     assert a["realized_pnl"] == 0.0
+
+
+def test_validate_flags_split_and_bad_data():
+    from app.portfolio.trade_history import validate
+    orders = [
+        # AMC-like reverse-split price range (2 -> 90): >8x -> split flag
+        {"symbol": "AMC", "side": "buy", "quantity": 100, "price": 2.0, "date": "2021-06-01"},
+        {"symbol": "AMC", "side": "sell", "quantity": 100, "price": 90.0, "date": "2023-09-01"},
+        # non-positive price
+        {"symbol": "XYZ", "side": "buy", "quantity": 10, "price": 0.0, "date": "2022-01-01"},
+        # sell with no prior buys
+        {"symbol": "ZZZ", "side": "sell", "quantity": 5, "price": 10.0, "date": "2022-01-01"},
+    ]
+    w = validate(orders)
+    issues = " ".join(x["issue"] for x in w)
+    assert "STOCK SPLIT" in issues
+    assert "non-positive" in issues
+    assert "exceeds prior buys" in issues
+
+
+def test_validate_clean_data_no_flags():
+    from app.portfolio.trade_history import validate
+    clean = [
+        {"symbol": "NVDA", "side": "buy", "quantity": 10, "price": 100.0, "date": "2023-01-05"},
+        {"symbol": "NVDA", "side": "sell", "quantity": 10, "price": 130.0, "date": "2023-06-05"},
+    ]
+    assert validate(clean) == []

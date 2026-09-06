@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 
-from .trade_history import analyze, load_trade_history
+from .trade_history import analyze, load_trade_history, validate
 
 
 def main() -> None:
@@ -19,9 +19,22 @@ def main() -> None:
         print("No data/trade_history.json found. Run /trade-history in your local Claude "
               "(with the robinhood-trading MCP) to export it first.")
         return
+    warnings = validate(orders)
+    if warnings:
+        print("=" * 60)
+        print(f"DATA-QUALITY CHECK — {len(warnings)} flag(s) (verify before trusting P&L):")
+        shown: set[str] = set()
+        for w in warnings:
+            key = f"{w['symbol']}:{w['issue'][:30]}"
+            if key in shown:
+                continue
+            shown.add(key)
+            print(f"  [{w['level']:5}] {w['symbol']:6} {w['issue']}")
+        print()
+
     a = analyze(orders)
     print("=" * 60)
-    print("TRADE HISTORY ANALYSIS")
+    print(f"TRADE HISTORY ANALYSIS  ({len(orders)} raw executions)")
     print(f"  Matched round-trips : {a['trades_matched']}")
     print(f"  Realized P&L        : ${a['realized_pnl']:,.2f}")
     print(f"  Win rate            : {a['win_rate_pct']}%")
