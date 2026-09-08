@@ -1,9 +1,12 @@
 # Secrets & config
 .env
+.env.*
+!.env.example
 config/config.yaml
 config/holdings.yaml
 *.key
 secrets/
+conf/
 data/*.db
 data/*.sqlite
 data/trade_plan.json
@@ -29,3 +32,23 @@ dist/
 data/prices/
 data/history.db
 data/trade_history.json
+
+# Local research artifacts (private views, run outputs) — not for the repo
+data/feeds/
+data/sweeps/
+data/releases/
+data/webull_positions.json
+data/forward_record.jsonl
+data/macro_facts.jsonl
+# Run artefacts, not source. NOTE data/trials.jsonl is the multiple-testing
+# ledger: it is local because it is machine-specific, but deleting it RESETS the
+# trial count and re-inflates every Deflated Sharpe. Archive it, do not clear it.
+data/trials.jsonl
+data/autonomy.json
+
+# Everything under data/ is GENERATED — caches, run artefacts and fetched bars.
+# Nothing in it has ever been tracked, and the OHLC + minute stores alone are
+# ~29MB of regenerable market data that would bloat every clone. Refetch with
+# `python -m app.data.ohlc --universe` and `python -m app.data.minute --fetch`.
+# The specific rules above are kept for the notes they carry (see trials.jsonl).
+data/

@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Operating Guide — Trading Portal</title>
+  <style>
+    :root {
+      --bg:#0b0e14; --panel:#131823; --panel2:#1b2231; --line:#26304a;
+      --text:#e6e9ef; --muted:#8b93a7; --green:#3fb950; --red:#f85149;
+      --accent:#58a6ff; --warn:#e3b341;
+      --measure:74ch;
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text);
+      font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+    header { display:flex; align-items:center; gap:16px; padding:14px 20px;
+      background:var(--panel); border-bottom:1px solid var(--line);
+      position:sticky; top:0; z-index:5; }
+    header h1 { font-size:16px; margin:0; letter-spacing:.3px; }
+    a { color:var(--accent); }
+    .back { margin-left:auto; text-decoration:none; font-size:13px;
+      border:1px solid var(--line); padding:6px 12px; border-radius:8px; }
+    .back:hover { border-color:var(--accent); }
+
+    main { max-width:1180px; margin:0 auto; padding:28px 24px 80px;
+      display:grid; grid-template-columns:210px 1fr; gap:36px; align-items:start; }
+    @media (max-width:900px){ main { grid-template-columns:1fr; } nav { position:static !important; } }
+
+    nav { position:sticky; top:70px; font-size:13px; }
+    nav a { display:block; padding:5px 0; color:var(--muted); text-decoration:none;
+      border-left:2px solid transparent; padding-left:10px; }
+    nav a:hover { color:var(--text); border-left-color:var(--line); }
+    nav .navhead { color:var(--text); font-weight:600; padding-left:10px;
+      margin:16px 0 4px; font-size:11px; text-transform:uppercase; letter-spacing:1px; }
+    nav .navhead:first-child { margin-top:0; }
+
+    /* One typographic scale, used consistently. A guide people scan needs
+       heading levels that differ enough to be told apart at a glance. */
+    h2 { font-size:22px; margin:44px 0 4px; letter-spacing:-.2px; scroll-margin-top:80px; }
+    h2:first-of-type { margin-top:0; }
+    h2 .lede { display:block; font-size:14px; font-weight:400; color:var(--muted);
+      margin-top:4px; letter-spacing:0; }
+    h3 { font-size:15px; margin:26px 0 6px; color:var(--text); }
+    p, li { max-width:var(--measure); }
+    p { margin:10px 0; }
+    ul { padding-left:20px; margin:10px 0; }
+    li { margin:5px 0; }
+    code { background:var(--panel2); border:1px solid var(--line); border-radius:5px;
+      padding:1px 6px; font-size:13px; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; }
+    pre { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+      padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.6;
+      font-family:ui-monospace,SFMono-Regular,Consolas,monospace; }
+    pre code { background:none; border:none; padding:0; }
+
+    table { width:100%; border-collapse:collapse; font-size:14px; margin:14px 0;
+      display:block; overflow-x:auto; }
+    th,td { text-align:left; padding:9px 12px; border-bottom:1px solid var(--line);
+      vertical-align:top; }
+    th { color:var(--muted); font-size:11px; text-transform:uppercase;
+      letter-spacing:.6px; font-weight:600; white-space:nowrap; }
+    td.num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+
+    /* Callouts carry weight by role, not decoration. Three only. */
+    .note { border-left:3px solid var(--accent); background:rgba(88,166,255,.06);
+      padding:12px 16px; border-radius:0 8px 8px 0; margin:16px 0; max-width:var(--measure); }
+    .warn { border-left:3px solid var(--warn); background:rgba(227,179,65,.07);
+      padding:12px 16px; border-radius:0 8px 8px 0; margin:16px 0; max-width:var(--measure); }
+    .stop { border-left:3px solid var(--red); background:rgba(248,81,73,.07);
+      padding:12px 16px; border-radius:0 8px 8px 0; margin:16px 0; max-width:var(--measure); }
+    .note b, .warn b, .stop b { display:block; margin-bottom:3px; font-size:12px;
+      text-transform:uppercase; letter-spacing:.7px; }
+    .note b { color:var(--accent); } .warn b { color:var(--warn); } .stop b { color:var(--red); }
+
+    .go   { color:var(--green); font-weight:600; }
+    .caut { color:var(--warn);  font-weight:600; }
+    .alrm { color:var(--red);   font-weight:600; }
+    .muted { color:var(--muted); }
+    .kicker { font-size:11px; text-transform:uppercase; letter-spacing:1.2px;
+      color:var(--muted); margin-bottom:6px; }
+    hr { border:none; border-top:1px solid var(--line); margin:36px 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>⚙︎ Operating Guide</h1>
+    <span class="muted" style="font-size:12px;">how to run this, read it, and learn from it</span>
+    <a class="back" href="/">← Dashboard</a>
+  </header>
+
+  <main>
+    <nav>
+      <div class="navhead">Operate</div>
+      <a href="#morning">The 3-minute morning</a>
+      <a href="#automatic">What runs by itself</a>
+      <a href="#you">What needs you</a>
+      <a href="#danger">Buttons that trade</a>
+      <div class="navhead">Read</div>
+      <a href="#board">Flight Status</a>
+      <a href="#legs">The two legs</a>
+      <a href="#decisions">Decision queue</a>
+      <a href="#agents">The agents</a>
+      <div class="navhead">Learn</div>
+      <a href="#proven">What's been proven</a>
+      <a href="#rules">Rules it enforces</a>
+      <a href="#traps">Traps it watches for</a>
+      <div class="navhead">Reference</div>
+      <a href="#commands">Commands</a>
+    </nav>
+
+    <article>
+      <div class="kicker">Operate</div>
+      <h2 id="morning">The 3-minute morning
+        <span class="lede">If you only do one thing, do this.</span></h2>
+
+      <p><b>Open the dashboard and read the top line of Flight Status. If it says
+      <span class="go">GO</span>, close the tab.</b> That is the entire routine on a
+      normal day, and most days are normal.</p>
+
+      <p>Everything below the last <span class="caut">CAUTION</span> row is deliberately
+      dimmed. Those rows exist to be skipped — they are proof the system checked, not
+      information you need to absorb.</p>
+
+      <div class="note"><b>Why it works this way</b>
+      A launch controller does not read their console; they scan a column of lights and
+      look only at what is not green. A display that needs interpreting gets interpreted
+      late. Everything nominal stays quiet on purpose.</div>
+
+      <h2 id="automatic">What runs by itself
+        <span class="lede">Three things, none of which can place an order.</span></h2>
+
+      <table>
+        <thead><tr><th>Component</th><th>Cadence</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td><b>Live recorder</b></td><td>every 5 min, market hours</td>
+            <td>Logs what the system <i>would</i> do, before outcomes are known. This is the
+              only out-of-sample evidence the project can generate.</td></tr>
+          <tr><td><b>Orchestrator</b></td><td>hourly</td>
+            <td>Runs the research agents on their own cadences and writes their artefacts.</td></tr>
+          <tr><td><b>Panels</b></td><td>4s – 10 min</td>
+            <td>Quotes are fast; the status board and theme data are slow because they walk
+              your trade history.</td></tr>
+        </tbody>
+      </table>
+
+      <p>All of it starts with <code>launch.bat</code>. There is no second command.</p>
+
+      <h2 id="you">What needs you
+        <span class="lede">One category, and it is structural — not an oversight.</span></h2>
+
+      <p>Fundamentals, SEC filing facts and earnings dates arrive through the broker MCP.
+      <b>The portal holds no broker credentials by design</b>, so Claude fetches those and
+      commits them as dated snapshots. That dating is also what keeps them point-in-time
+      honest — a snapshot you can see the age of cannot silently go stale.</p>
+
+      <p>The system tells you which pulls it needs rather than expecting you to know:</p>
+      <pre><code>python -m app.agent.orchestrator</code></pre>
+      <p>Look for the <b>NEEDS A HUMAN</b> block at the bottom.</p>
+
+      <h2 id="danger">Buttons that place orders</h2>
+
+      <div class="stop"><b>Read before pressing</b>
+      <b style="text-transform:none;letter-spacing:0;font-size:15px;display:inline;">Run
+      Strategy Tick</b>, <b style="text-transform:none;letter-spacing:0;font-size:15px;display:inline;">Start
+      Strategy Loop</b> and <b style="text-transform:none;letter-spacing:0;font-size:15px;display:inline;">Run
+      Daily Analysis</b> place orders in the current mode. In <code>paper</code> that is
+      harmless. Do not switch to live and press them: walk-forward validation put the
+      conviction engine ahead of buy-and-hold in <b>1 of 6</b> out-of-sample folds.
+      Automating it would only lose money more reliably.</div>
+
+      <p><b>Kill-Switch</b> (top right) halts all execution immediately.</p>
+
+      <hr>
+      <div class="kicker">Read</div>
+      <h2 id="board">Flight Status
+        <span class="lede">Ordered by consequence. The top line always matters most.</span></h2>
+
+      <table>
+        <thead><tr><th>State</th><th>Means</th><th>Do</th></tr></thead>
+        <tbody>
+          <tr><td class="alrm">ALARM</td><td>capital or evidence integrity affected</td><td>Look now.</td></tr>
+          <tr><td class="caut">CAUTION</td><td>worth a look this week</td><td>Not today.</td></tr>
+          <tr><td class="go">GO</td><td>nominal</td><td>Skip it.</td></tr>
+          <tr><td class="muted">NO DATA</td><td>the check could not run</td><td>Treat as unknown, never as a pass.</td></tr>
+        </tbody>
+      </table>
+
+      <p>A <code>!</code> marks a capital-critical subsystem. <b>NO DATA is reported rather
+      than skipped</b> — a check that quietly fails reads exactly like a check that passed,
+      and that is how a real problem hides.</p>
+
+      <h2 id="legs">The two legs
+        <span class="lede">Separate books, separate edges, separate clocks.</span></h2>
+
+      <table>
+        <thead><tr><th></th><th>Core (~80%)</th><th>Options (~20%)</th></tr></thead>
+        <tbody>
+          <tr><th>Question</th><td>Is the thesis still true?</td><td>Is there a mispriced event?</td></tr>
+          <tr><th>Horizon</th><td>years, to the 2028 peak</td><td>weeks, 30–60 DTE</td></tr>
+          <tr><th>Cadence</th><td>quarterly, when a filing lands</td><td>daily</td></tr>
+          <tr><th>Evidence</th><td>filings, peer multiples, growth</td><td>vol rank, event calendar</td></tr>
+        </tbody>
+      </table>
+
+      <p><b>They do not share a brain, and that is enforced in code.</b> The same fact points
+      opposite ways depending on horizon: MU's revenue growth being 97% price tells the core
+      leg <i>don't own this</i> and tells the options leg <i>premium is rich</i>. One brain
+      would have to pick, and be wrong half the time.</p>
+
+      <p>They meet at exactly one place — <b>covered calls and cash-secured puts</b> — because
+      those are the only structures whose assignment hands the core pool shares it did not
+      choose. Every other options structure risks only the sleeve's own premium and asks
+      nobody.</p>
+
+      <div class="warn"><b>Why the clocks differ</b>
+      Every public "AI hedge fund desk" writeup puts everything on one 6 AM cadence. On a book
+      held to 2028 that is ~250 chances a year to talk yourself out of a thesis that has not
+      changed. The core leg re-grades when new evidence exists — a filing — not every morning.</div>
+
+      <h2 id="decisions">The decision queue
+        <span class="lede">One list instead of eleven reports.</span></h2>
+
+      <p>Every record carries its own audit trail, so a decision read a week later can still
+      be checked rather than merely remembered:</p>
+
+      <table>
+        <thead><tr><th>Field</th><th>Why it is there</th></tr></thead>
+        <tbody>
+          <tr><td><code>claim</code></td><td>one sentence of what is true</td></tr>
+          <tr><td><code>evidence</code></td><td>the numbers, each with a <b>source and an as_of</b>, so a stale input is visible instead of inherited</td></tr>
+          <tr><td><code>falsifier</code></td><td><b>what would prove this wrong.</b> Required — a record without one is rejected</td></tr>
+          <tr><td><code>gate</code></td><td>FINISH or PARK, decided by <b>reversibility, never importance</b></td></tr>
+          <tr><td><code>owner</code></td><td>which agent produced it, so a wrong call is attributable</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="agents">The agents
+        <span class="lede">Deterministic code, not language models.</span></h2>
+
+      <p>Each owns exactly one result and has a cadence and a gate. <b>Makers</b> produce
+      evidence and never judge it. <b>Checkers</b> judge and never produce. The <b>chief</b>
+      routes and gates, and generates nothing.</p>
+
+      <p>That split is not tidiness. The thesis ledger's net-margin checkpoints all passed on
+      ANET while the filing showed costs growing 46.9% against revenue's 37.7% — a checker
+      reading its own preferred number. Only a second maker with a different input catches
+      that.</p>
+
+      <p>In the Agents panel: a <b>pulse</b> means a tick fired, a <b>sweep</b> means an agent
+      is running, a <b>flash</b> means a number actually changed. No motion is ambient.</p>
+
+      <hr>
+      <div class="kicker">Learn</div>
+      <h2 id="proven">What this system has actually proven
+        <span class="lede">The uncomfortable part, and the most valuable.</span></h2>
+
+      <table>
+        <thead><tr><th>Question</th><th>Measured answer</th></tr></thead>
+        <tbody>
+          <tr><td>Does the conviction algorithm beat buy-and-hold?</td>
+            <td><b>No.</b> 1 of 6 walk-forward folds. Deflated Sharpe below the bar that
+              selection across 15 configs produces by chance.</td></tr>
+          <tr><td>Do the discretionary entries beat SPY?</td>
+            <td><b>No.</b> 40% hit rate at 63 days, 28% at a year. Median pick lost to the
+              index; the positive average is the 2021 squeeze.</td></tr>
+          <tr><td>Does theme selection work?</td>
+            <td><b>Yes.</b> EV 4.1×, crypto 2.2×, ARM +$27,627 on a structural thesis.</td></tr>
+          <tr><td>What did exits cost?</td>
+            <td><b>−$148,258</b> against $70,000 of realised profit across a decade.</td></tr>
+        </tbody>
+      </table>
+
+      <div class="stop"><b>The single most important number</b>
+      Exit timing cost more than twice what a decade of trading made. Three days —
+      2021-02-02, 2024-05-22, 2024-07-17 — each sold 17–30 names and bought <b>nothing</b>.
+      They were portfolio reflexes, not stock decisions, and they caught the winners along
+      with the losers. PLTR alone: <b>−$94,006</b>.</div>
+
+      <p><b>What to take from this.</b> Your edge is picking themes with a structural
+      backstop and holding them. It is not timing, and the record says so twice. The largest
+      available gain is not a better entry — it is not repeating one mass liquidation.</p>
+
+      <h2 id="rules">Rules the system enforces</h2>
+
+      <h3>The approval line is drawn by reversibility</h3>
+      <p>Research, screening, drafting and staging <b>finish</b> — none of it can be undone
+      wrongly. Ordering, selling, deleting, overwriting and transferring <b>park</b>.
+      <b>Anything unclassified parks</b>: an unknown action is treated as irreversible.</p>
+
+      <h3>Iteration has a visible price</h3>
+      <p>Every strategy configuration examined is recorded. Try 100 things and the best one's
+      Sharpe is inflated by selection alone — that is exactly how a 16pp overfit gap appears.
+      The Deflated Sharpe Ratio discounts for how many things you tried, so
+      <b>the bar rises every time you search harder</b>.</p>
+
+      <h3>Autonomy is earned and can be lost</h3>
+      <p>A routine is promoted only on 5+ clean runs at a 100% pass rate, and is
+      <b>demoted automatically</b> when its pass rate decays. Deliberately asymmetric: the
+      cost of over-trusting a broken routine is money; the cost of under-trusting a good one
+      is a manual run.</p>
+
+      <h3>Silence is not neutrality</h3>
+      <p>When a source has said nothing about a name, its slot is skipped — not scored 0.0.
+      A missing opinion is not a neutral opinion.</p>
+
+      <h2 id="traps">Traps it watches for</h2>
+
+      <h3>A low multiple is not a buy signal</h3>
+      <p>Memory trades at 23× because the market expects those earnings to fall — and the
+      filings agree: 97% of MU's revenue growth is price, not volume. <b>Cheap and
+      correctly-cheap look identical</b> on a valuation screen. That is why
+      <code>peak_margin_watch</code> fires on record margin <i>plus</i> a low P/E in a
+      cyclical sector.</p>
+
+      <h3>A theme rising slower than the index is rotating out</h3>
+      <p>Nothing looks wrong, you are still making money, and the opportunity cost is
+      invisible. This is the case a price chart hides and a P&amp;L never shows.</p>
+
+      <h3>A sold position raises no alarm anywhere</h3>
+      <p>It produces no drawdown, no row, no log entry. Its absence is silent <b>by
+      construction</b>, which is why the re-entry table has to look for it deliberately —
+      and why PLTR and RKLB went unnoticed for two years.</p>
+
+      <h3>Gross margin moves before net margin</h3>
+      <p>Buybacks, tax and one-time items sit between the business and the net line. ANET,
+      ALAB and NOW all passed their net-margin checkpoints while their gross margins were
+      already eroding.</p>
+
+      <hr>
+      <div class="kicker">Reference</div>
+      <h2 id="commands">Commands</h2>
+
+      <table>
+        <thead><tr><th>Command</th><th>Answers</th></tr></thead>
+        <tbody>
+          <tr><td><code>python -m app.agent.chief</code></td><td>What needs deciding, all sources, one list</td></tr>
+          <tr><td><code>python -m app.agent.orchestrator</code></td><td>What is due, and what needs a human</td></tr>
+          <tr><td><code>python -m app.analytics.statusboard</code></td><td>GO / NO-GO per subsystem</td></tr>
+          <tr><td><code>python -m app.intel.thesis</code></td><td>Is each holding's claim still true</td></tr>
+          <tr><td><code>python -m app.intel.filings</code></td><td>Is revenue growth price or volume</td></tr>
+          <tr><td><code>python -m app.analytics.peer_value</code></td><td>Cheap or dear <i>compared to what</i></td></tr>
+          <tr><td><code>python -m app.analytics.discovery</code></td><td>Names you do not own, worth a look</td></tr>
+          <tr><td><code>python -m app.analytics.researcher</code></td><td>The outward brief</td></tr>
+          <tr><td><code>python -m app.intel.themes</code></td><td>Which themes are alive or rotating</td></tr>
+          <tr><td><code>python -m app.analytics.sectors</code></td><td>Where money moved market-wide</td></tr>
+          <tr><td><code>python -m app.analytics.cycle_sectors</code></td><td>What this cycle year usually brings</td></tr>
+          <tr><td><code>python -m app.intel.exit_discipline</code></td><td>What selling has cost</td></tr>
+          <tr><td><code>python -m app.backtest.trials</code></td><td>What survives its own search</td></tr>
+          <tr><td><code>python -m app.agent.autonomy</code></td><td>What each routine has earned</td></tr>
+        </tbody>
+      </table>
+
+      <div class="note"><b>If you read one thing again</b>
+      The system's job is not to find you winners. It is to tell you when a thesis has broken,
+      when a theme has rotated, and when you are about to repeat something the record already
+      shows was expensive. Everything else is reference material.</div>
+    </article>
+  </main>
+</body>
+</html>

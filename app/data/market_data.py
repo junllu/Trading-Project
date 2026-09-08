@@ -55,6 +55,49 @@ class MarketData:
         if prices:
             self._last[symbol] = Quote(symbol=symbol, price=float(prices[-1]))
 
+    def load_real_history(self, symbol: str, bars: int | None = None) -> bool:
+        """Seed history from REAL daily closes. Returns True on success.
+
+        Sources, in order: the CSV cache under data/prices/ (written by the
+        backtest data layer), then yfinance. Falls back to nothing — the caller
+        decides whether to synthesize.
+
+        This matters more than it looks: `backfill_trend` produces a nearly
+        straight line, which makes realized_vol read ~0.03-0.05 for names whose
+        true annualized vol is 0.5-1.2. That pins the sizing volatility scalar
+        at its 1.5 ceiling for every symbol, so the risk-parity term in
+        app/engine/sizing.py silently does nothing at all.
+        """
+        n = bars or self.history_len
+        try:
+            from ..config import ROOT
+            p = ROOT / "data" / "prices" / f"{symbol.upper()}.csv"
+            if p.exists():
+                import csv
+                closes = []
+                with p.open("r", encoding="utf-8") as fh:
+                    for row in csv.DictReader(fh):
+                        try:
+                            closes.append(float(row["close"]))
+                        except (KeyError, ValueError):
+                            continue
+                if len(closes) >= 20:
+                    self.seed_history(symbol, closes[-n:])
+                    return True
+        except Exception:
+            pass
+        try:
+            import yfinance as yf
+            df = yf.download(symbol, period="1y", progress=False, auto_adjust=True)
+            if df is not None and not df.empty:
+                closes = [float(x) for x in df["Close"].values.ravel()]
+                if len(closes) >= 20:
+                    self.seed_history(symbol, closes[-n:])
+                    return True
+        except Exception:
+            pass
+        return False
+
     def backfill_trend(self, symbol: str, start: float, end: float, bars: int = 80,
                        noise: float = 0.012) -> None:
         """Synthesize a plausible price path from `start` to `end`.
@@ -86,3 +129,70 @@ class MarketData:
         else:
             price = round(random.uniform(50, 300), 2)
         return Quote(symbol=symbol, price=price)
+
+
+def report() -> dict:
+    """Agent entrypoint — coverage and freshness of the real-price cache.
+
+    This maker's failure mode is not an exception, it is fabrication: an earlier
+    version silently synthesised near-straight lines when a symbol was missing,
+    which read as ~0.05 annualised volatility for names whose true vol was above
+    1.0 and pinned every volatility scalar at its ceiling. Sizing looked like it
+    was working and was inert. So the number that matters here is how many held
+    names have REAL history, and any gap is named rather than filled.
+    """
+    import csv
+    from datetime import date, datetime
+
+    from ..config import ROOT
+
+    prices_dir = ROOT / "data" / "prices"
+    files = sorted(prices_dir.glob("*.csv")) if prices_dir.exists() else []
+
+    newest: str | None = None
+    stale: list[str] = []
+    for f in files:
+        try:
+            with f.open("r", encoding="utf-8") as fh:
+                rows = list(csv.DictReader(fh))
+            if not rows:
+                stale.append(f.stem)
+                continue
+            last = rows[-1].get("date") or rows[-1].get("Date")
+            if last:
+                newest = max(newest, last) if newest else last
+        except Exception:
+            stale.append(f.stem)
+
+    cached = {f.stem.upper() for f in files}
+    try:
+        from ..portfolio.holdings import UNTRADEABLE, load_holdings
+        held = {str(h["symbol"]).upper() for h in load_holdings()}
+        # Excluded, not missing. A delisted position has no feed to fetch, and
+        # reporting it as a gap forever teaches the reader to ignore this list.
+        excluded = held & set(UNTRADEABLE)
+        held -= excluded
+    except Exception:
+        held, excluded = set(), set()
+    missing = sorted(held - cached)
+
+    age = None
+    if newest:
+        try:
+            age = (date.today() - datetime.strptime(newest, "%Y-%m-%d").date()).days
+        except ValueError:
+            age = None
+
+    return {
+        "symbols_cached": len(files),
+        "newest_bar": newest,
+        "age_days": age,
+        "unreadable": sorted(stale),
+        "held_symbols": len(held),
+        "excluded_untradeable": sorted(excluded),
+        "held_without_real_history": missing,
+        "coverage_pct": round(100 * (1 - len(missing) / len(held)), 1) if held else None,
+        "note": ("Held names absent here fall back to SYNTHETIC prices, whose "
+                 "volatility is meaningless — every risk scalar computed from them "
+                 "is wrong in the direction of taking more risk, not less."),
+    }

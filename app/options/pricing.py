@@ -67,12 +67,19 @@ def black_scholes(spot: float, strike: float, days: float, vol: float,
 def implied_vol_guess(symbol: str) -> float:
     """A rough default annualized vol when we have no live IV.
 
-    Bucketed by asset type so estimates aren't wildly off. Replace with real IV
-    from an options chain as soon as one is connected.
+    Per-symbol overrides come first, calibrated from a real ~35-40d ATM/OTM
+    chain read (2026-09-04): MRVL 64.7%, TSLA 41.8%, NVDA 34.0% — MRVL runs
+    much hotter than the generic "high vol" bucket assumed, NVDA and TSLA
+    noticeably cooler. Falls back to asset-type buckets for anything else, then
+    to the flat default. Replace with live IV from an options chain whenever one
+    is connected — these are still rough, dated snapshots, not a live feed.
     """
-    high_vol = {"NVDA", "MRVL", "ALAB", "BE", "RDDT", "BULL", "CCXI", "AEIS", "VRT", "SMH"}
+    overrides = {"MRVL": 0.65, "TSLA": 0.42, "NVDA": 0.34}
+    high_vol = {"ALAB", "BE", "RDDT", "BULL", "CCXI", "AEIS", "VRT", "SMH"}
     etf_low = {"SPY", "QQQ", "JEPQ", "TLT", "XLE", "XLF", "GLD"}
     s = symbol.upper()
+    if s in overrides:
+        return overrides[s]
     if s in etf_low:
         return 0.18
     if s in high_vol:

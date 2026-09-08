@@ -43,6 +43,17 @@ def dashboard(request: Request):
     return templates.TemplateResponse(request, "dashboard.html", {"mode": settings.mode.value})
 
 
+@app.get("/guide", response_class=HTMLResponse)
+def guide(request: Request):
+    """Operating guide — how to run this, read it, and learn from it.
+
+    Served from the portal rather than kept as a separate document: the thing
+    that explains a console belongs next to the console, and a guide that lives
+    somewhere else goes stale the first time the console changes.
+    """
+    return templates.TemplateResponse(request, "guide.html", {"mode": settings.mode.value})
+
+
 @app.get("/health")
 def health():
     return {"ok": True, "mode": settings.mode.value}

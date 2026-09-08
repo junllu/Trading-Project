@@ -19,6 +19,21 @@ except Exception:  # pragma: no cover
 
 HOLDINGS_PATH = ROOT / "config" / "holdings.yaml"
 
+# Positions that exist on the book but cannot be acted on. These are NOT gaps to
+# be closed: no price feed will ever cover them, no thesis can be graded, and no
+# exit is available. Reporting them as missing data every run trains the eye to
+# skip warnings, which is how a real gap gets missed — so they are excluded by
+# name, with the reason recorded here rather than in someone's memory.
+UNTRADEABLE: dict[str, str] = {
+    "NEWYY": "delisted; broker reports an inactive instrument and the position "
+             "cannot be sold. Excluded from price coverage, onboarding and "
+             "screening. Carried at cost basis in holdings.yaml.",
+}
+
+
+def is_untradeable(symbol: str) -> bool:
+    return symbol.upper() in UNTRADEABLE
+
 
 def load_holdings(path: Path | None = None) -> list[dict]:
     p = path or HOLDINGS_PATH

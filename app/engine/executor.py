@@ -127,9 +127,16 @@ class Executor:
                 self.history.append(order)
                 return ExecutionResult(order, False, order.reason)
         result = broker.place_order(order)
-        self.risk.record_order()
         self.history.append(result)
         accepted = result.status in (OrderStatus.FILLED, OrderStatus.SUBMITTED)
+        # Symbol and side are what make this countable as a day trade; without
+        # them the risk manager can only count orders, and orders are not day
+        # trades. Recorded only when the broker took it — a rejected order
+        # spends no PDT slot.
+        if accepted:
+            self.risk.record_order(result.symbol, result.side.value)
+        else:
+            self.risk.record_order()
         return ExecutionResult(result, accepted, result.reason or result.status.value)
 
     # confirm-mode approval -------------------------------------------------

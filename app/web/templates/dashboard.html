@@ -26,14 +26,58 @@
     button.danger { color:var(--red); border-color:#5c2626; }
     button.danger.armed { background:var(--red); color:#fff; }
     button.go { color:var(--green); }
-    main { padding:20px; display:grid; gap:16px; grid-template-columns:repeat(12,1fr); max-width:1300px; margin:0 auto; }
+    main { padding:18px 22px 60px; display:grid; gap:14px; grid-template-columns:repeat(12,1fr);
+      max-width:1720px; margin:0 auto; align-items:start; }
     .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; }
     .card h2 { font-size:12px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); margin:0 0 12px; }
-    .col-4 { grid-column:span 4; } .col-6 { grid-column:span 6; } .col-8 { grid-column:span 8; } .col-12 { grid-column:span 12; }
-    @media (max-width:900px){ .col-4,.col-6,.col-8 { grid-column:span 12; } }
+    .col-3 { grid-column:span 3; } .col-4 { grid-column:span 4; } .col-6 { grid-column:span 6; }
+    .col-8 { grid-column:span 8; } .col-9 { grid-column:span 9; } .col-12 { grid-column:span 12; }
+    @media (max-width:1400px){ .col-3 { grid-column:span 6; } .col-9 { grid-column:span 12; } }
+    @media (max-width:900px){ .col-3,.col-4,.col-6,.col-8,.col-9 { grid-column:span 12; } }
+
+    /* --- hierarchy -------------------------------------------------------
+       Seventeen panels at identical weight meant the status board looked the
+       same as "Recent Signals", so the eye had nowhere to land. Three tiers
+       now, by how often each is USED rather than by how interesting it is:
+       primary is glanced at every session, secondary is the book, reference
+       is collapsed until asked for. */
+    .zone { grid-column:span 12; display:flex; align-items:center; gap:10px;
+      margin:14px 0 -4px; color:var(--muted); font-size:11px;
+      text-transform:uppercase; letter-spacing:1.2px; }
+    .zone::after { content:""; flex:1; height:1px; background:var(--line); }
+    .zone:first-child { margin-top:0; }
+
+    .card.primary { background:linear-gradient(180deg,#161d2b,#131823);
+      border-color:#33415e; box-shadow:0 1px 0 rgba(255,255,255,.03) inset; }
+    .card.primary h2 { font-size:13px; color:var(--text); }
+
+    /* Reference panels collapse. Most are empty most of the time, and four
+       empty tables between Positions and Trade Style is the main reason this
+       page was five screens tall. */
+    details.card > summary { list-style:none; cursor:pointer; font-size:12px;
+      text-transform:uppercase; letter-spacing:.6px; color:var(--muted);
+      display:flex; align-items:center; gap:8px; }
+    details.card > summary::-webkit-details-marker { display:none; }
+    details.card > summary::before { content:"▸"; color:var(--line); font-size:11px; }
+    details.card[open] > summary::before { content:"▾"; }
+    details.card > summary:hover { color:var(--text); }
+    details.card[open] > summary { margin-bottom:12px; }
+    summary .count { margin-left:auto; font-size:11px; color:var(--muted);
+      font-variant-numeric:tabular-nums; }
     .stat { font-size:26px; font-weight:700; }
     .stat.sub { font-size:13px; color:var(--muted); font-weight:400; }
     .kpis { display:flex; gap:24px; flex-wrap:wrap; }
+    /* A flex row of five KPIs wraps into a ragged column once the card is only
+       a third of the width. A 2-up grid keeps the numbers aligned and the
+       labels on a shared baseline, which is what makes them comparable at a
+       glance rather than five separate readings. */
+    .kpis.stacked { display:grid; grid-template-columns:repeat(2,minmax(0,1fr));
+      gap:14px 18px; }
+    .kpis.stacked > div:first-child { grid-column:1 / -1; }
+    .kpis.stacked .stat { font-size:20px; font-variant-numeric:tabular-nums; }
+    .kpis.stacked > div:first-child .stat { font-size:28px; }
+    .kpis.stacked .stat.sub { font-size:11px; text-transform:uppercase;
+      letter-spacing:.5px; }
     table { width:100%; border-collapse:collapse; font-size:13px; }
     th,td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); white-space:nowrap; }
     th { color:var(--muted); font-weight:600; font-size:11px; text-transform:uppercase; }
@@ -47,6 +91,59 @@
     form.order label { display:flex; flex-direction:column; gap:3px; font-size:11px; color:var(--muted); }
     form.order input, form.order select { background:var(--panel2); color:var(--text);
       border:1px solid var(--line); border-radius:7px; padding:6px 8px; font-size:13px; }
+    /* --- motion ----------------------------------------------------------
+       Every animation here reports something that actually happened. None of
+       it is ambient: a pulse means a tick fired, a sweep means an agent is
+       running now, a flash means that number just changed. Motion with no
+       referent is decoration, and on a console it trains you to ignore motion
+       that does matter. */
+
+    /* 1. Orchestrator tick — the chip pulses once per real tick. */
+    @keyframes tickPulse {
+      0%   { box-shadow:0 0 0 0 rgba(88,166,255,.55); }
+      70%  { box-shadow:0 0 0 9px rgba(88,166,255,0); }
+      100% { box-shadow:0 0 0 0 rgba(88,166,255,0); }
+    }
+    .ticked { animation:tickPulse 1.1s ease-out 1; }
+
+    /* 2. An agent is running — a sweep travels along its row, left to right,
+          in the direction work flows through the graph. */
+    @keyframes sweep { from { transform:translateX(-100%); } to { transform:translateX(320%); } }
+    .agent { position:relative; overflow:hidden; display:flex; align-items:center;
+      gap:10px; padding:5px 8px; border-radius:7px; font-size:12px; }
+    .agent + .agent { margin-top:2px; }
+    .agent.running::after { content:""; position:absolute; inset:0 auto 0 0; width:32%;
+      background:linear-gradient(90deg,transparent,rgba(88,166,255,.22),transparent);
+      animation:sweep 1.25s linear infinite; pointer-events:none; }
+    /* A 7% wash on a dark panel is about two RGB steps — measured, and below
+       what the eye resolves at a glance. State has to be carried by an EDGE,
+       which reads instantly at any size, with the tint only reinforcing it. */
+    .agent.due { background:rgba(227,179,65,.10); box-shadow:inset 2px 0 0 var(--warn); }
+    .agent.running { box-shadow:inset 2px 0 0 var(--accent); }
+    .agent .dot { width:7px; height:7px; border-radius:50%; background:var(--line); flex:none; }
+    .agent.due .dot { background:var(--warn); }
+    .agent.running .dot { background:var(--accent); }
+    .agent .nm { min-width:132px; font-weight:600; }
+    .agent .cad { color:var(--muted); min-width:74px; font-size:11px; }
+    .agent .why { color:var(--muted); flex:1; overflow:hidden; text-overflow:ellipsis;
+      white-space:nowrap; }
+    .agent.unwired { opacity:.4; }
+
+    /* 3. A value changed — brief flash, tinted by direction. Fires only on a
+          real delta, never on a re-render that produced the same text. */
+    @keyframes flashUp   { from { background:rgba(63,185,80,.22); } to { background:transparent; } }
+    @keyframes flashDown { from { background:rgba(248,81,73,.22); } to { background:transparent; } }
+    .chg-up   { animation:flashUp 1.4s ease-out 1;   border-radius:4px; }
+    .chg-down { animation:flashDown 1.4s ease-out 1; border-radius:4px; }
+
+    /* A console is watched for hours. Anyone who has asked the OS to stop
+       moving things gets the state without the motion — the dot colours and
+       the row tint still carry every distinction above. */
+    @media (prefers-reduced-motion: reduce) {
+      .ticked, .agent.running::after, .chg-up, .chg-down { animation:none; }
+      .agent.running { outline:1px solid var(--accent); outline-offset:-1px; }
+    }
+
     .muted { color:var(--muted); }
     .empty { color:var(--muted); padding:8px 0; font-size:13px; }
     .banner { padding:8px 12px; border-radius:8px; background:#3a1d1d; color:var(--red);
@@ -58,19 +155,43 @@
   <header>
     <h1>⚙︎ Trading Portal</h1>
     <span class="mode {{ mode }}" id="mode">{{ mode }}</span>
-    <span class="pill" id="loopState">loop: —</span>
+    <span class="pill" id="loopState" title="Strategy engine: sma_crossover / rsi_reversion from config.yaml. PLACES ORDERS.">strategy loop: —</span>
+    <span class="pill" id="liveState" title="Session-aware recorder. Logs signals to forward_record.jsonl. Never places orders.">recorder: —</span>
     <div class="spacer"></div>
-    <button class="go" onclick="api('/api/tick','POST')">Run Tick</button>
-    <button id="loopBtn" onclick="toggleLoop()">Start Loop</button>
+    <button class="go" onclick="api('/api/tick','POST')" title="One cycle of the config strategies (sma_crossover, rsi_reversion). PLACES ORDERS.">Run Strategy Tick ⚡</button>
+    <button id="loopBtn" onclick="toggleLoop()" title="Repeat the strategy tick every 60s. PLACES ORDERS.">Start Strategy Loop ⚡</button>
+    <a href="/guide" title="How to operate, read and learn from this system"
+       style="text-decoration:none;color:var(--muted);border:1px solid var(--line);
+              padding:7px 12px;border-radius:8px;font-size:13px;">Guide</a>
     <button class="danger" id="killBtn" onclick="toggleKill()">Kill-Switch</button>
   </header>
+
+  <aside id="dossier"><button id="closeDossier" onclick="closeDossier()">Close</button>
+    <div id="dossierBody"></div></aside>
 
   <div class="banner" id="killBanner">⛔ Kill-switch engaged — all execution is halted.</div>
   <div class="banner" id="campBanner">⛔ Campaign drawdown halt — capital preservation engaged.</div>
 
   <main>
+    <div class="zone">Now &mdash; glance here first</div>
+
+    <!-- ===================== FLIGHT STATUS ===================== -->
+    <!-- First panel on purpose. A launch controller scans a column of lights and
+         looks only at what is not green; everything nominal stays quiet. The
+         eleven tables below require you to know each threshold and compare it
+         yourself, which works for a review and fails for a ten-minute check.
+         Rows are ordered by CONSEQUENCE, so the top line is always the one that
+         matters most — you never scroll to find a problem. -->
+    <section class="card primary col-12" id="boardCard">
+      <h2>🛰 Flight Status
+        <span class="pill" id="boardOverall" style="margin-left:8px;">—</span>
+        <span class="muted" id="boardCounts" style="margin-left:8px;font-size:11px;"></span>
+      </h2>
+      <div id="board" class="muted">checking subsystems…</div>
+    </section>
+
     <!-- ===================== CAMPAIGN: MISSION TO $1M ===================== -->
-    <section class="card col-12" id="campCard" style="border-color:#3a5a3a;background:linear-gradient(180deg,#141b22,#131823);">
+    <section class="card primary col-8" id="campCard" style="border-color:#3a5a3a;">
       <h2>🎯 Campaign — Mission to $1,000,000
         <span class="pill" id="campPhase" style="margin-left:8px;">—</span>
         <span class="pill" id="campPace" style="margin-left:4px;">—</span>
@@ -90,9 +211,102 @@
         <span class="muted" style="font-size:12px;">Focus: <b id="campFocus">—</b></span>
       </div>
     </section>
-    <section class="card col-12">
-      <h2>Account</h2>
+    <!-- ============ LIVE RECORDER (records only, never trades) ============ -->
+    <section class="card col-4" id="liveCard" style="border-color:#2b4a5a;">
+      <h2>📼 Live Recorder — records signals, never places orders
+        <span class="pill" id="liveSession" style="margin-left:8px;">session: —</span>
+        <span class="pill" id="liveRunning" style="margin-left:4px;">—</span>
+      </h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center;">
+        <button id="liveBtn" onclick="toggleLive()">Start Recorder</button>
+        <button onclick="api('/api/live/cycle','POST').then(refresh)"
+                title="Force one evaluation now, regardless of session. Records only.">Record One Cycle</button>
+        <span class="muted" id="liveSummary" style="flex:1;min-width:260px;">—</span>
+      </div>
       <div class="kpis">
+        <div><div class="stat" id="liveRows">—</div><div class="stat sub">Rows recorded</div></div>
+        <div><div class="stat" id="liveCycles">—</div><div class="stat sub">Cycles this run</div></div>
+        <div><div class="stat" id="liveErrors">—</div><div class="stat sub">Errors</div></div>
+        <div><div class="stat sub" style="font-size:12px;">Next open<br><b id="liveNextOpen">—</b></div></div>
+      </div>
+      <div class="muted" style="font-size:12px;margin-top:8px;">
+        Forward record → <code>data/forward_record.jsonl</code>. This is the only
+        out-of-sample evidence the project can generate: signals logged before the
+        outcome is known.
+      </div>
+    </section>
+
+
+    <!-- ============ CAPITAL SLEEVE (confidence ladder) ============ -->
+    <section class="card col-12" id="sleeveCard" style="border-color:#5a4a2b;">
+      <h2>Capital Sleeve — % return ladder
+        <span class="pill" id="sleeveGate" style="margin-left:8px;">—</span>
+        <span class="pill" id="sleeveStage" style="margin-left:4px;">—</span>
+      </h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center;">
+        <button onclick="refreshSleeve(true)" title="Re-grade forward_record (network).">Refresh grade</button>
+        <span class="muted" id="sleeveAdvice" style="flex:1;min-width:260px;">—</span>
+      </div>
+      <div class="kpis">
+        <div><div class="stat" id="sleeveLive">—</div><div class="stat sub">Live sleeve</div></div>
+        <div><div class="stat" id="sleevePaper">—</div><div class="stat sub">Paper shadow</div></div>
+        <div><div class="stat" id="sleeveN">—</div><div class="stat sub">Graded / pending</div></div>
+        <div><div class="stat" id="sleeveEdge">—</div><div class="stat sub">Edge vs hold (pp)</div></div>
+        <div><div class="stat" id="sleeveHit">—</div><div class="stat sub">Hit rate</div></div>
+      </div>
+      <div class="muted" style="font-size:12px;margin-top:8px;">
+        Ladder: $0 → paper $1k (MEASURED ≥30) → live $1k (EVIDENCED ≥100 + edge&gt;0) → live $5k (ESTABLISHED ≥250 + DD≤25%).
+        Promote releases manually. Rewards unlock deeper analysis, not more size.
+        <span id="sleeveAsOf"></span>
+      </div>
+    </section>
+
+    <!-- ===================== AGENTS ===================== -->
+    <!-- The work was invisible: twelve agents ran on their own cadences and the
+         only evidence was numbers quietly changing. This shows the labour, not
+         just the result. -->
+    <section class="card col-12" id="agentsCard">
+      <h2>⚙ Agents
+        <span class="pill" id="orchChip" style="margin-left:8px;">orchestrator: —</span>
+        <span class="muted" id="orchDue" style="margin-left:8px;font-size:11px;"></span>
+      </h2>
+      <div id="agents" class="muted">loading…</div>
+      <div id="agentQueue" class="muted" style="margin-top:10px;font-size:11px;"></div>
+    </section>
+
+    <!-- ===================== RESEARCH BRIEF ===================== -->
+    <!-- The outward view. Every other panel describes the book; this one is the
+         only thing looking at what is NOT in it, which is where the stated
+         problem lives — signals missed because the judgement is at work. -->
+    <section class="card col-12" id="researchCard">
+      <h2>🔭 Research Brief
+        <span class="pill" id="briefAge" style="margin-left:8px;">—</span>
+        <span class="muted" id="briefScan" style="margin-left:8px;font-size:11px;"></span>
+      </h2>
+      <div style="display:grid;grid-template-columns:1.35fr 1fr;gap:16px;">
+        <div>
+          <div class="muted" style="margin-bottom:6px;">Shortlist &mdash; names you
+            do <b>not</b> own, in themes that are alive</div>
+          <table><thead><tr>
+            <th>Symbol</th><th>Theme</th><th class="num">vs SPY 6m</th>
+            <th class="num">Vol</th><th>Pool</th><th>Peer standing</th>
+          </tr></thead><tbody id="briefRows"></tbody></table>
+        </div>
+        <div>
+          <div class="muted" style="margin-bottom:6px;">Sentiment</div>
+          <div id="briefSentiment" style="font-size:12px;line-height:1.7;"></div>
+          <div class="muted" id="briefQueue" style="margin-top:10px;font-size:11px;"></div>
+        </div>
+      </div>
+      <div class="muted" style="margin-top:10px;font-size:11px;">
+        This brief rates nothing. It narrows attention; the checkers judge.</div>
+    </section>
+
+    <div class="zone">The book</div>
+
+    <section class="card col-3">
+      <h2>Account</h2>
+      <div class="kpis stacked">
         <div><div class="stat" id="equity">—</div><div class="stat sub">Equity</div></div>
         <div><div class="stat" id="cash">—</div><div class="stat sub">Cash</div></div>
         <div><div class="stat" id="upnl">—</div><div class="stat sub">Unrealized P&amp;L</div></div>
@@ -101,7 +315,7 @@
       </div>
     </section>
 
-    <section class="card col-8">
+    <section class="card col-5">
       <h2>Positions</h2>
       <table><thead><tr>
         <th>Symbol</th><th class="num">Qty</th><th class="num">Avg</th><th class="num">Last</th>
@@ -116,8 +330,71 @@
         <tbody id="watchlist"></tbody></table>
     </section>
 
-    <section class="card col-6">
-      <h2>Manual Order</h2>
+<!-- ============ TRADE STYLE: themes, re-entry, exit cost ============ -->
+    <!-- Positions and orders were the only lenses here, and neither matches how
+         decisions are actually made: entries are THEMES, exits are rotations.
+         The re-entry table exists because a sold position leaves no row on any
+         other panel — its absence is silent, which is why it went unnoticed for
+         two years on PLTR and RKLB. -->
+    <section class="card col-12" style="border-color:#4a3a2f;">
+      <h2>🎯 Trade Style
+        <span class="pill" id="benchChip" style="margin-left:8px;">SPY 6m: —</span>
+        <span class="pill" id="forgoneChip" style="margin-left:4px;">exit cost: —</span>
+      </h2>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+        <div>
+          <div class="muted" style="margin-bottom:6px;">Theme state &amp; exposure
+            &mdash; your entry/exit unit</div>
+          <table><thead><tr>
+            <th>Theme</th><th>State</th><th class="num">6m</th>
+            <th class="num">vs SPY</th><th class="num">Exposure</th>
+          </tr></thead><tbody id="themes"></tbody></table>
+        </div>
+        <div>
+          <div class="muted" style="margin-bottom:6px;">Re-entry &mdash; sold, but
+            the theme is still alive</div>
+          <table><thead><tr>
+            <th>Symbol</th><th>Theme</th><th>Sold</th>
+            <th class="num">Move since</th><th class="num">Forgone</th>
+          </tr></thead><tbody id="reentry"></tbody></table>
+          <div class="muted" id="liqNote" style="margin-top:8px;font-size:11px;"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== INTRADAY TRUTH =====================
+         What the daily bar hides. MAE/MFE are measured from the session open,
+         so a day that closed flat but travelled -3% intraday stops looking
+         quiet. This is the evidence layer under the stop levels in
+         exit_plans.py — which are currently ASSERTED, not tested.
+         The sessions count is deliberately printed next to every conclusion:
+         a send-window from 3 sessions and one from 300 read identically once
+         they reach a panel, and the operator cannot otherwise tell them apart. -->
+    <section class="card col-12" id="intradayCard" style="border-color:#4a2f4a;">
+      <h2>⏱ Intraday Truth — what the daily bar hides
+        <span class="pill" id="intraCoverage" style="margin-left:8px;">—</span>
+        <span class="pill" id="intraTiming" style="margin-left:4px;">—</span>
+      </h2>
+      <div class="muted" style="font-size:12px;margin-bottom:8px;">
+        MAE / MFE are the worst and best excursions <b>from the open</b>, with the
+        minute each printed. A stop is only honest if measured here: a daily bar
+        cannot tell a touched level from a close.
+      </div>
+      <table><thead><tr>
+        <th>Symbol</th><th>Date</th>
+        <th class="num">Open</th><th class="num">Close</th>
+        <th class="num">MAE</th><th class="num">@min</th>
+        <th class="num">MFE</th><th class="num">@min</th>
+        <th class="num">Range</th><th class="num">Close loc</th>
+      </tr></thead><tbody id="intraday"></tbody></table>
+      <div class="muted" id="intraNote" style="margin-top:8px;font-size:11px;"></div>
+    </section>
+
+    <div class="zone">Reference &mdash; open when needed</div>
+
+    <details class="card col-6">
+      <summary>Manual Order</summary>
       <form class="order" onsubmit="return submitOrder(event)">
         <label>Symbol<input name="symbol" placeholder="AAPL" required /></label>
         <label>Side<select name="side"><option value="buy">Buy</option><option value="sell">Sell</option></select></label>
@@ -127,28 +404,28 @@
         <button type="submit">Submit</button>
       </form>
       <div id="orderMsg" class="empty"></div>
-    </section>
+    </details>
 
-    <section class="card col-6">
-      <h2>Pending Approval</h2>
+    <details class="card col-6">
+      <summary>Pending Approval<span class="count" id="pendingCount">0</span></summary>
       <table><thead><tr><th>Symbol</th><th>Side</th><th class="num">Qty</th><th></th></tr></thead>
         <tbody id="pending"></tbody></table>
       <div class="empty" id="pendingEmpty">Nothing awaiting approval.</div>
-    </section>
+    </details>
 
-    <section class="card col-6">
-      <h2>Recent Orders</h2>
+    <details class="card col-6">
+      <summary>Recent Orders<span class="count" id="ordersCount">0</span></summary>
       <table><thead><tr><th>Symbol</th><th>Side</th><th class="num">Qty</th><th>Status</th><th>Detail</th></tr></thead>
         <tbody id="orders"></tbody></table>
       <div class="empty" id="ordersEmpty">No orders yet.</div>
-    </section>
+    </details>
 
-    <section class="card col-6">
-      <h2>Recent Signals</h2>
+    <details class="card col-6">
+      <summary>Recent Signals<span class="count" id="signalsCount">0</span></summary>
       <table><thead><tr><th>Symbol</th><th>Side</th><th>Strategy</th><th>Note</th></tr></thead>
         <tbody id="signals"></tbody></table>
       <div class="empty" id="signalsEmpty">No signals yet.</div>
-    </section>
+    </details>
 
     <!-- ===================== DAILY AGENT ===================== -->
     <section class="card col-12" style="border-color:#2f4a3a;">
@@ -157,8 +434,8 @@
         <span class="pill" id="scheduleChip" style="margin-left:4px;">schedule: —</span>
       </h2>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center;">
-        <button class="go" onclick="runAgent(this)">▶ Run Daily Analysis</button>
-        <button id="schedBtn" onclick="toggleSchedule()">Start Schedule</button>
+        <button class="go" onclick="runAgent(this)" title="Conviction pipeline over YOUR holdings. PLACES ORDERS (mode-aware).">▶ Run Daily Analysis ⚡</button>
+        <button id="schedBtn" onclick="toggleSchedule()" title="Fire the daily analysis once a day. PLACES ORDERS.">Start Schedule</button>
         <span class="muted" id="agentSummary" style="flex:1;min-width:240px;">Not run yet.</span>
       </div>
       <table><thead><tr>
@@ -232,6 +509,31 @@
       const killed = $("killBtn").classList.contains("armed");
       await api(killed ? "/api/resume" : "/api/kill", "POST");
     }
+    async function toggleLive(){
+      const running = $("liveBtn").dataset.running === "1";
+      await api(running ? "/api/live/stop" : "/api/live/start", "POST");
+      renderLive();
+    }
+    async function renderLive(){
+      try {
+        const s = await (await fetch("/api/live/status")).json();
+        $("liveBtn").dataset.running = s.running ? "1":"0";
+        $("liveBtn").textContent = s.running ? "Stop Recorder":"Start Recorder";
+        $("liveRunning").textContent = s.running ? "running" : "stopped";
+        $("liveRunning").style.color = s.running ? "#3fb950" : "#8b93a7";
+        $("liveState").textContent = "recorder: " + (s.running ? "running" : "stopped");
+        $("liveSession").textContent = "session: " + (s.session||"—") + (s.market_open?" (open)":"");
+        $("liveRows").textContent = s.record_rows ?? "—";
+        $("liveCycles").textContent = s.cycles ?? "—";
+        $("liveErrors").textContent = s.errors ?? 0;
+        $("liveNextOpen").textContent = s.next_open ? s.next_open.replace("T"," ") : "—";
+        const lc = s.last_cycle;
+        $("liveSummary").textContent = lc
+          ? `last cycle ${lc.recorded_at_et} · equity $${Number(lc.equity).toLocaleString()} · ${lc.intended_orders.length} intent(s), none placed`
+          : "no cycles recorded yet";
+        if (s.last_error) $("liveSummary").textContent += ` · last error: ${s.last_error}`;
+      } catch(e){ /* dashboard stays usable if the endpoint is unavailable */ }
+    }
     async function toggleLoop(){
       const running = $("loopBtn").dataset.running === "1";
       await api(running ? "/api/loop/stop" : "/api/loop/start", "POST");
@@ -254,7 +556,7 @@
     }
 
     function rowsPositions(ps){
-      return ps.map(p=>`<tr><td>${p.symbol}</td><td class="num">${p.quantity}</td>
+      return ps.map(p=>`<tr class="clickable" onclick="openDossier('${p.symbol}')"><td><b>${p.symbol}</b></td><td class="num">${p.quantity}</td>
         <td class="num">${money(p.avg_price)}</td><td class="num">${money(p.price)}</td>
         <td class="num">${money(p.market_value)}</td>
         <td class="num ${cls(p.unrealized_pnl)}">${money(p.unrealized_pnl)}</td>
@@ -273,8 +575,9 @@
       $("killBanner").classList.toggle("show", killed);
 
       $("loopBtn").dataset.running = s.loop_running ? "1":"0";
-      $("loopBtn").textContent = s.loop_running ? "Stop Loop":"Start Loop";
-      $("loopState").textContent = "loop: "+(s.loop_running?"running":"stopped");
+      $("loopBtn").textContent = s.loop_running ? "Stop Strategy Loop ⚡":"Start Strategy Loop ⚡";
+      $("loopState").textContent = "strategy loop: "+(s.loop_running?"running ⚡":"stopped");
+      $("loopState").style.color = s.loop_running ? "#ffb454" : "";
 
       const pf = s.portfolio||{};
       $("equity").textContent = money(pf.equity);
@@ -297,6 +600,8 @@
         <td><button class="go" onclick="approve('${o.id}')">✓</button>
             <button class="danger" onclick="reject('${o.id}')">✕</button></td></tr>`).join("");
       $("pendingEmpty").hidden = pend.length>0;
+      $("pendingCount").textContent = pend.length;
+      $("pendingCount").style.color = pend.length ? "var(--accent)" : "var(--muted)";
 
       const ords = s.recent_orders||[];
       $("orders").innerHTML = ords.map(o=>`<tr><td>${o.symbol}</td>
@@ -304,6 +609,8 @@
         <td><span class="pill ${o.status}">${o.status}</span></td>
         <td class="muted">${o.reason||""}</td></tr>`).join("");
       $("ordersEmpty").hidden = ords.length>0;
+      $("ordersCount").textContent = ords.length;
+      $("ordersCount").style.color = ords.length ? "var(--accent)" : "var(--muted)";
 
       window._sources = s.intel_sources || {};
 
@@ -329,6 +636,8 @@
         <td><span class="pill ${x.side}">${x.side}</span></td>
         <td>${x.strategy}</td><td class="muted">${x.note}</td></tr>`).join("");
       $("signalsEmpty").hidden = sigs.length>0;
+      $("signalsCount").textContent = sigs.length;
+      $("signalsCount").style.color = sigs.length ? "var(--accent)" : "var(--muted)";
     }
 
     const tiltClass = (t) => t==="risk_on"?"pos":(t==="risk_off"?"neg":"");
@@ -436,11 +745,299 @@
       } catch(e){}
     };
 
-    refresh();
-    refreshIntel();
+    refresh(); refreshSleeve(false); refreshIntel();
     loadReport();
+    renderLive();
+    // Theme state moves on a 6-month window and exit pricing walks the whole
+    // trade history, so this polls slowly on purpose. Putting it on the 4s
+    // quote loop would burn CPU to redraw numbers that change weekly.
+    const STATE_COLOR = {ALIVE:'#3fb950', FADING:'#d29922',
+                         ROTATING_OUT:'#f85149', DEAD:'#8b949e', NO_DATA:'#8b949e'};
+    async function refreshStyle(){
+      try{
+        const s = await (await fetch('/api/style')).json();
+        document.getElementById('benchChip').textContent =
+          'SPY 6m: ' + (s.benchmark_6m_pct ?? '—') + '%';
+        document.getElementById('forgoneChip').textContent =
+          'exit cost: $' + (s.forgone_total || 0).toLocaleString();
+
+        const rows = Object.values(s.themes || {})
+          .filter(t => t.state !== 'NO_DATA')
+          .sort((a,b) => (b.exposure_usd - a.exposure_usd));
+        document.getElementById('themes').innerHTML = rows.map(t => `
+          <tr><td>${t.name}</td>
+              <td style="color:${STATE_COLOR[t.state]||'#8b949e'}">${t.state}</td>
+              <td class="num">${t.basket_6m_pct}%</td>
+              <td class="num" style="color:${t.relative_6m_pct>=0?'#3fb950':'#f85149'}">
+                ${t.relative_6m_pct>0?'+':''}${t.relative_6m_pct}%</td>
+              <td class="num">${t.exposure_usd ? '$'+Math.round(t.exposure_usd).toLocaleString() : '—'}</td>
+          </tr>`).join('') || '<tr><td colspan="5" class="muted">no theme data</td></tr>';
+
+        const rc = s.reentry_candidates || [];
+        document.getElementById('reentry').innerHTML = rc.map(r => `
+          <tr><td>${r.symbol}</td><td>${r.theme}</td><td>${r.sold_on}</td>
+              <td class="num" style="color:${r.move_pct>=0?'#3fb950':'#f85149'}">
+                ${r.move_pct>0?'+':''}${r.move_pct}%</td>
+              <td class="num">$${(r.forgone_now||0).toLocaleString()}</td>
+          </tr>`).join('') ||
+          '<tr><td colspan="5" class="muted">nothing sold out of a live theme</td></tr>';
+
+        const liq = s.liquidation_days || [];
+        document.getElementById('liqNote').textContent = liq.length
+          ? 'Past mass liquidations (sold many, bought nothing): ' +
+            liq.map(d => d.date + ' ($' + Math.round(d.sold).toLocaleString() +
+                         ', ' + d.names + ' names)').join(' · ')
+          : '';
+      }catch(e){ /* leave the last good render up rather than blanking it */ }
+    }
+
+    // Intraday truth. Minute bars change slowly and the roll-up is cheap, but
+    // there is no reason to poll it on the quote interval — it only moves when
+    // a harvest lands.
+    async function refreshIntraday(){
+      try{
+        const d = await (await fetch('/api/intraday')).json();
+        const syms = Object.keys(d.symbols || {});
+        const rows = [];
+        let maxSessions = 0, timed = 0;
+
+        for (const s of syms){
+          const v = d.symbols[s];
+          maxSessions = Math.max(maxSessions, v.sessions || 0);
+          if (v.timing_status === 'OK') timed++;
+          for (const f of (v.recent || []).slice(-3)){
+            const pct = x => (x>=0?'+':'') + (x*100).toFixed(2) + '%';
+            rows.push(`<tr>
+              <td><b>${s}</b></td><td>${f.date}</td>
+              <td class="num">${f.open.toFixed(2)}</td>
+              <td class="num">${f.close.toFixed(2)}</td>
+              <td class="num" style="color:#f85149">${pct(f.mae_pct)}</td>
+              <td class="num muted">${f.mae_minute}</td>
+              <td class="num" style="color:#3fb950">${pct(f.mfe_pct)}</td>
+              <td class="num muted">${f.mfe_minute}</td>
+              <td class="num">${(f.range_pct*100).toFixed(2)}%</td>
+              <td class="num" style="color:${f.close_loc>=0.5?'#3fb950':'#f85149'}">
+                ${f.close_loc.toFixed(2)}</td>
+            </tr>`);
+          }
+        }
+
+        document.getElementById('intraday').innerHTML = rows.join('') ||
+          '<tr><td colspan="10" class="muted">no minute bars stored — ' +
+          'run <code>python -m app.data.minute --fetch SYM --days 365</code></td></tr>';
+
+        const covEl = document.getElementById('intraCoverage');
+        covEl.textContent = syms.length
+          ? `${syms.length} symbol(s) · ${maxSessions} session(s)` : 'no data';
+        covEl.style.color = maxSessions >= d.min_sessions_for_timing ? '#3fb950' : '#d29922';
+
+        // The send-window pill must never imply a recommendation exists when the
+        // sample cannot support one. It says UNPROVEN until the data earns it.
+        const tEl = document.getElementById('intraTiming');
+        tEl.textContent = timed
+          ? `send-window: ${timed}/${syms.length} symbols`
+          : `send-window: UNPROVEN (<${d.min_sessions_for_timing} sessions)`;
+        tEl.style.color = timed ? '#3fb950' : '#8b949e';
+
+        document.getElementById('intraNote').textContent = d.note || '';
+      }catch(e){ /* keep the last good render rather than blanking the panel */ }
+    }
+
+    setInterval(renderLive, 5000);
     setInterval(refresh, 4000);
     setInterval(refreshIntel, 30000);
+    setInterval(refreshIntraday, 60000);
+    refreshIntraday();
+    // Flight status. Colour carries severity, but the LABEL carries it too —
+    // a board that only speaks in colour is unreadable to a colourblind user
+    // and unreadable in a screenshot.
+    const BOARD_COLOR = {NOMINAL:'#3fb950', CAUTION:'#d29922',
+                         ALARM:'#f85149', 'NO DATA':'#8b949e'};
+    const BOARD_MARK  = {NOMINAL:'GO', CAUTION:'CAUTION', ALARM:'ALARM', 'NO DATA':'NO DATA'};
+    
+    async function refreshSleeve(force){
+      try {
+        const s = force
+          ? await api('/api/sleeve/refresh','POST')
+          : await (await fetch('/api/sleeve')).json();
+        const gate = s.gate || 'NO DATA';
+        const gEl = document.getElementById('sleeveGate');
+        gEl.textContent = gate;
+        document.getElementById('sleeveStage').textContent = 'hint: ' + (s.release_stage_hint || '—');
+        document.getElementById('sleeveLive').textContent = '$' + (s.recommended_sleeve_usd ?? 0);
+        document.getElementById('sleevePaper').textContent = '$' + (s.paper_shadow_usd ?? 0);
+        document.getElementById('sleeveN').textContent = (s.n ?? 0) + ' / ' + (s.pending ?? 0);
+        document.getElementById('sleeveEdge').textContent =
+          (s.edge_vs_hold_pp == null) ? '—' : ((s.edge_vs_hold_pp >= 0 ? '+' : '') + s.edge_vs_hold_pp);
+        document.getElementById('sleeveHit').textContent =
+          (s.hit_rate_pct == null) ? '—' : (s.hit_rate_pct + '%');
+        document.getElementById('sleeveAdvice').textContent = s.advice || '—';
+        document.getElementById('sleeveAsOf').textContent = s.as_of ? (' · as of ' + s.as_of) : '';
+        document.getElementById('sleeveCard').style.borderColor =
+          (s.recommended_sleeve_usd > 0) ? '#3a5a3a' : '#5a4a2b';
+      } catch(e) {
+        document.getElementById('sleeveAdvice').textContent = 'sleeve unavailable: ' + e;
+      }
+    }
+
+    async function refreshBoard(){
+      try{
+        const b = await (await fetch('/api/board')).json();
+        const chip = document.getElementById('boardOverall');
+        chip.textContent = b.overall;
+        chip.style.color = BOARD_COLOR[b.overall] || '#8b949e';
+        document.getElementById('boardCounts').textContent =
+          `${b.alarms} alarm · ${b.cautions} caution`;
+        document.getElementById('boardCard').style.borderColor =
+          b.overall === 'ALARM' ? '#5a2f2f' : (b.overall === 'CAUTION' ? '#5a4a2f' : '#2f4a3a');
+
+        document.getElementById('board').innerHTML = b.checks.map(c => {
+          const col = BOARD_COLOR[c.state] || '#8b949e';
+          // Nominal rows render dim and without detail — they exist to be
+          // skipped, not read.
+          const dim = c.state === 'NOMINAL' ? 'opacity:.45;' : '';
+          const detail = (c.state !== 'NOMINAL' && c.detail.length)
+            ? `<div style="margin:2px 0 8px 96px;font-size:11px;color:#8b949e">
+                 ${c.detail.map(d => d.replace(/</g,'&lt;')).join('<br>')}</div>` : '';
+          return `<div style="${dim}display:flex;gap:10px;align-items:baseline;padding:3px 0;">
+              <span style="color:${col};font-weight:600;min-width:64px;">${BOARD_MARK[c.state]}</span>
+              <span style="color:#f85149;width:10px;">${c.critical ? '!' : ''}</span>
+              <span style="min-width:96px;font-weight:600;">${c.system}</span>
+              <span>${c.line.replace(/</g,'&lt;')}</span>
+            </div>${detail}`;
+        }).join('');
+      }catch(e){
+        document.getElementById('board').textContent =
+          'status board unavailable — the checks could not run';
+      }
+    }
+
+    refreshStyle();
+    setInterval(refreshStyle, 600000);   // 10 min
+    // ---- agents: make the work visible ---------------------------------
+    let lastTicks = null;          // null = first load, so it cannot false-pulse
+    let runningUntil = {};         // agent -> timestamp its sweep should stop
+
+    async function refreshAgents(){
+      try{
+        const a = await (await fetch('/api/agents')).json();
+        const o = a.orchestrator || {};
+
+        const chip = document.getElementById('orchChip');
+        chip.textContent = o.running
+          ? `orchestrator: running · ${o.ticks} tick${o.ticks === 1 ? '' : 's'}`
+          : 'orchestrator: stopped';
+        chip.style.color = o.running ? 'var(--green)' : 'var(--muted)';
+
+        // Pulse ONLY on a real tick. Comparing against null on first load
+        // prevents a pulse for work that happened before the page opened.
+        if (lastTicks !== null && o.ticks > lastTicks){
+          chip.classList.remove('ticked');
+          void chip.offsetWidth;            // restart the animation
+          chip.classList.add('ticked');
+          const now = Date.now();
+          (o.last_ran || []).forEach(n => { runningUntil[n] = now + 4000; });
+        }
+        lastTicks = o.ticks;
+
+        const dueN = (a.agents || []).filter(x => x.due).length;
+        document.getElementById('orchDue').textContent =
+          dueN ? `${dueN} due now` : 'nothing due';
+
+        const now = Date.now();
+        document.getElementById('agents').innerHTML = (a.agents || []).map(x => {
+          const running = (runningUntil[x.name] || 0) > now;
+          const cls = ['agent', running ? 'running' : '', x.due ? 'due' : '',
+                       x.wired ? '' : 'unwired'].filter(Boolean).join(' ');
+          const when = x.last_run ? new Date(x.last_run).toLocaleString() : 'never';
+          return `<div class="${cls}" title="${x.owns.replace(/"/g,'&quot;')}">
+              <span class="dot"></span>
+              <span class="nm">${x.name}</span>
+              <span class="cad">${x.cadence}</span>
+              <span class="why">${running ? 'running…' : (x.due ? x.reason : 'last run ' + when)}</span>
+            </div>`;
+        }).join('');
+
+        const q = a.human_queue || [];
+        document.getElementById('agentQueue').innerHTML = q.length
+          ? '<b style="color:var(--warn)">Needs a human:</b> ' +
+            q.map(s => s.replace(/</g,'&lt;')).join(' · ')
+          : '';
+      }catch(e){ /* keep the last good render rather than blanking the panel */ }
+    }
+
+    // ---- flash a value that actually changed ---------------------------
+    // Keyed by element id, so a re-render that produces the SAME text is
+    // silent. Flashing on every refresh would make the page twitch constantly
+    // and teach you to stop looking at it.
+    const lastVals = {};
+    function flashChanges(ids){
+      ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const txt = el.textContent.trim();
+        const prev = lastVals[id];
+        if (prev !== undefined && prev !== txt){
+          const num = s => parseFloat(String(s).replace(/[^0-9.\-]/g, '')) || 0;
+          const up = num(txt) >= num(prev);
+          el.classList.remove('chg-up','chg-down');
+          void el.offsetWidth;
+          el.classList.add(up ? 'chg-up' : 'chg-down');
+        }
+        lastVals[id] = txt;
+      });
+    }
+    const WATCHED = ['equity','cash','upnl','ordersToday','dailyLoss','bookValue'];
+    setInterval(() => flashChanges(WATCHED), 4000);
+
+    refreshBoard();
+    setInterval(refreshBoard, 300000);   // 5 min — it walks the trade history
+    refreshAgents();
+    setInterval(refreshAgents, 15000);   // cheap: reads state, runs nothing
+
+    // ---- research brief -------------------------------------------------
+    // Reads the persisted artefact. The researcher writes it on a daily
+    // cadence; rebuilding on every poll would rescan the universe for a page
+    // refresh.
+    async function refreshResearch(){
+      try{
+        const b = await (await fetch('/api/research')).json();
+        if (b.empty){ document.getElementById('briefAge').textContent = 'no brief yet'; return; }
+        document.getElementById('briefAge').textContent = b.as_of || '—';
+        const d = b.discovery || {};
+        document.getElementById('briefScan').textContent =
+          `${d.scanned ?? '—'} scanned · ${d.in_live_themes ?? '—'} in live themes`;
+
+        const val = b.valuation || {};
+        document.getElementById('briefRows').innerHTML = (b.candidates || []).map(c => {
+          const v = val[c.symbol];
+          const peer = v ? `${v.rank} ${v.band}` : '<span class="muted">needs MCP pull</span>';
+          return `<tr><td><b>${c.symbol}</b></td><td>${c.theme}</td>
+            <td class="num" style="color:${c.vs_benchmark_pct>=0?'#3fb950':'#f85149'}">
+              ${c.vs_benchmark_pct>0?'+':''}${c.vs_benchmark_pct}%</td>
+            <td class="num">${(c.realized_vol ?? 0).toFixed(2)}</td>
+            <td>${c.pool}</td><td>${peer}</td></tr>`;
+        }).join('') || '<tr><td colspan="6" class="muted">nothing in a live theme</td></tr>';
+
+        const s = b.sentiment || {}, th = s.themes || {}, sf = s.sector_flow || {},
+              cs = s.curated_sources || {};
+        const gap = (th.alive_without_exposure || []);
+        document.getElementById('briefSentiment').innerHTML = `
+          <div>themes alive &nbsp;<b>${(th.alive||[]).join(', ') || '—'}</b></div>
+          ${gap.length ? `<div style="color:var(--warn)">alive, NO exposure &nbsp;<b>${gap.join(', ')}</b></div>` : ''}
+          <div>sector leaders &nbsp;<b>${(sf.leaders_1m||[]).join(', ') || '—'}</b></div>
+          <div class="muted">improving &nbsp;${(sf.improving||[]).join(', ') || '—'}</div>
+          ${sf.defensive_leadership ? '<div style="color:var(--warn)">defensive leadership &mdash; the bid has changed character</div>' : ''}
+          <div class="muted">sources live ${(cs.live||[]).join(', ')||'none'} · stale ${(cs.stale||[]).join(', ')||'none'}</div>`;
+
+        const q = b.mcp_queue || [];
+        document.getElementById('briefQueue').innerHTML = q.length
+          ? `<b style="color:var(--warn)">${q.length} MCP pull(s) queued</b> — Claude runs these`
+          : '';
+      }catch(e){ /* keep the last good render */ }
+    }
+    refreshResearch();
+    setInterval(refreshResearch, 300000);   // 5 min
   </script>
 </body>
 </html>

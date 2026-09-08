@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from .agent.daily import DailyAgent
+from .agent.live_loop import LiveLoop
 from .agent.scheduler import DailyScheduler
 from .analytics import ConvictionEngine
 from .analytics.technical import technical_score
@@ -60,6 +61,8 @@ class Portal:
     conviction: ConvictionEngine = field(default_factory=ConvictionEngine)
     daily_agent: Optional[DailyAgent] = None
     scheduler: Optional[DailyScheduler] = None
+    orchestrator: Optional[object] = None
+    live: Optional[LiveLoop] = None
     campaign: Optional[Campaign] = None
     strategy_runs: list[StrategyRun] = field(default_factory=list)
     signal_log: list[Signal] = field(default_factory=list)
@@ -106,11 +109,28 @@ class Portal:
                 by_symbol: dict[str, dict] = {}
                 for h in holdings:
                     by_symbol.setdefault(str(h["symbol"]).upper(), h)
+                # Prefer REAL daily closes — a synthesized cost->current path is
+                # nearly straight, which zeroes out realized volatility and pins
+                # the sizing vol-scalar at its ceiling for every name.
+                synthesized = []
+                from .portfolio.holdings import is_untradeable
                 for sym, h in by_symbol.items():
-                    self.market.backfill_trend(
-                        sym, float(h.get("avg_price", h.get("last", 0))),
-                        float(h.get("last", h.get("avg_price", 0))),
-                    )
+                    # A delisted position has no feed to fetch. Attempting it
+                    # every boot logs a warning that is permanently unfixable,
+                    # which teaches the reader to ignore this warning class —
+                    # and that is how a REAL missing feed gets missed.
+                    if is_untradeable(sym):
+                        continue
+                    if not self.market.load_real_history(sym):
+                        self.market.backfill_trend(
+                            sym, float(h.get("avg_price", h.get("last", 0))),
+                            float(h.get("last", h.get("avg_price", 0))),
+                        )
+                        synthesized.append(sym)
+                if synthesized:
+                    log.warning("no real price history for %s — using a synthetic path; "
+                                "volatility-based sizing is unreliable for these",
+                                ",".join(sorted(synthesized)))
                 # Your holdings are tradeable by the agent, so allow them at the risk gate.
                 if self.risk is not None:
                     self.risk.allowed_symbols.update(self.held_symbols)
@@ -135,7 +155,51 @@ class Portal:
             sizing=SizingParams(**(agent_cfg.get("sizing", {}) or {})),
             execute=agent_cfg.get("execute", True), forecaster=forecaster,
         )
-        self.scheduler = DailyScheduler(self.daily_agent.run, at=agent_cfg.get("run_at", "09:00"))
+        def _scheduled_job():
+            auto = (self.settings.raw.get("autonomy") or {})
+            if auto.get("daily_uses_autonomy_cycle", True):
+                return self.run_autonomy_cycle()
+            return self.daily_agent.run()
+        self.scheduler = DailyScheduler(_scheduled_job, at=agent_cfg.get("run_at", "09:00"))
+        # Session-aware live loop shares THIS portal, so the dashboard and the
+        # loop can never drift onto different prices or conviction scores.
+        live_cfg = agent_cfg.get("live", {}) or {}
+        self.live = LiveLoop(self, interval=int(live_cfg.get("interval_seconds", 300)))
+        if live_cfg.get("autostart", False):
+            self.live.start()
+
+        # Research orchestrator: runs the roster on its DECLARED cadences.
+        # Without this, `cadence_class` in app/agent/roster.py was documentation
+        # — it said what should run when, and then nothing ran unless a human
+        # typed the module name. Read-only: makers and checkers only, never the
+        # coordinator, so it cannot stage or place anything.
+        from .agent.orchestrator import OrchestratorLoop
+        orch_cfg = agent_cfg.get("orchestrator", {}) or {}
+        self.orchestrator = OrchestratorLoop(
+            tick_seconds=int(orch_cfg.get("tick_seconds", 3600)))
+        if orch_cfg.get("autostart", True):
+            self.orchestrator.start()
+
+        # Earned autonomy: start the daily schedule + optional ops tick without
+        # a dashboard click. Trading still obeys sleeve policy + TRADING_MODE.
+        auto_cfg = self.settings.raw.get("autonomy") or {}
+        # The 09:00 job routes conviction orders through the executor. In paper
+        # that is simulated and in confirm it parks for approval, but in LIVE it
+        # would submit real orders with no human in the loop — which is exactly
+        # what CLAUDE.md forbids ("never place an order without explicit user
+        # approval in this session"). Autostart is therefore refused in live
+        # mode: arming a trigger by launching a dashboard is not consent.
+        if auto_cfg.get("schedule_autostart", True):
+            if self.settings.mode is TradingMode.LIVE:
+                log.warning(
+                    "daily schedule NOT autostarted: mode is LIVE. Start it "
+                    "deliberately from the dashboard, or run in confirm mode "
+                    "where orders queue for approval.")
+            else:
+                try:
+                    self.scheduler.start()
+                except Exception:
+                    pass
 
         # Campaign: the mission (grow existing capital to a target by a deadline).
         camp_cfg = self.settings.raw.get("campaign", {}) or {}
@@ -281,6 +345,12 @@ class Portal:
         rep = self.daily_agent.last_report
         return rep.to_dict() if rep else {}
 
+    def run_autonomy_cycle(self) -> dict[str, Any]:
+        """Performance grade + plan + policy-gated execute + improvement proposals."""
+        self.ensure_built()
+        from .agent.autonomy_ops import run_cycle
+        return run_cycle(self)
+
     def start_schedule(self) -> dict[str, Any]:
         self.ensure_built()
         self.scheduler.start()
@@ -290,6 +360,24 @@ class Portal:
         self.ensure_built()
         self.scheduler.stop()
         return self.scheduler.status()
+
+    # live loop --------------------------------------------------------------
+    def start_live(self) -> dict[str, Any]:
+        self.ensure_built()
+        return self.live.start()
+
+    def stop_live(self) -> dict[str, Any]:
+        self.ensure_built()
+        return self.live.stop()
+
+    def live_status(self) -> dict[str, Any]:
+        self.ensure_built()
+        return self.live.status()
+
+    def live_cycle_now(self) -> dict[str, Any]:
+        """Force one evaluation regardless of session (records, never trades)."""
+        self.ensure_built()
+        return self.live.cycle("manual")
 
     # intelligence + options -----------------------------------------------
     def intel_briefing(self, force: bool = False, use_x: bool = False) -> dict[str, Any]:
@@ -398,6 +486,7 @@ class Portal:
             "held_symbols": self.held_symbols,
             "analyst": {"live": self.analyst.live, "model": self.analyst.model},
             "schedule": self.scheduler.status() if self.scheduler else {},
+            "orchestrator": self.orchestrator.status() if self.orchestrator else {},
             "campaign": self.campaign.status(self._book_value()).to_dict() if self.campaign else {},
         }
 

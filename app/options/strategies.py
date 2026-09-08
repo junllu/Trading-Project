@@ -1,9 +1,11 @@
-"""Income option strategies: covered calls, cash-secured puts, sell-the-news.
+"""Option strategies: covered calls, cash-secured puts, sell-the-news (income —
+capped upside, collateral-backed) and long-call gem bets (debit — defined max
+loss, uncapped convexity).
 
 These generate *plans for your review* — sized to real holdings and cash, with
 estimated premiums and assignment odds from Black-Scholes. They do not place
-option orders automatically (options assignment risk warrants a human tap), and
-every plan carries explicit warnings.
+option orders automatically (options risk warrants a human tap), and every
+plan carries explicit warnings.
 
 Premiums are theoretical (BS) until a live options chain is connected; treat
 them as ballpark, not fills.
@@ -93,6 +95,50 @@ def cash_secured_put_candidates(symbols: list[str], prices: dict[str, float], ca
             rationale=(f"Get paid ${premium_total:,.0f} to agree to buy {sym} at {strike:g} "
                        f"({otm_pct*100:.0f}% below {spot:g}). Assignment odds ~{q.prob_itm*100:.0f}%."),
             warnings=(["assignment means buying 100 sh/contract — only sell puts on names you want to own"]),
+        ))
+    return sorted(plans, key=lambda p: -p.annualized_return)
+
+
+def long_call_gem_candidates(candidates: list, prices: dict[str, float], pocket_size: float = 1000.0,
+                             days: int = 35, otm_pct: float = 0.08) -> list[OptionPlan]:
+    """Small, defined-risk directional bets for the "gem" sleeve.
+
+    Opposite risk shape from the income strategies above: max loss is the
+    premium paid (never more), no collateral, no assignment risk — but no
+    floor either, and the whole premium can go to zero at expiry. Sized so a
+    total loss is survivable: pass the same small pocket_size used for gem
+    equity allocations (app/portfolio/pockets.py), never the core sleeve.
+
+    `candidates` is a list of objects with `.symbol` and `.upside` (matches
+    app.portfolio.pockets.Candidate) — ranked by upside, same as the gem
+    equity path, so a gem slot can be filled with shares OR a call from the
+    same candidate pool.
+    """
+    plans: list[OptionPlan] = []
+    for c in candidates:
+        spot = prices.get(c.symbol, 0.0)
+        if spot <= 0:
+            continue
+        strike = round(spot * (1 + otm_pct), 2)
+        q = _quote(c.symbol, spot, strike, days, is_call=True)
+        premium_per_contract = q.premium * 100
+        if premium_per_contract <= 0 or premium_per_contract > pocket_size:
+            continue                                      # even 1 contract doesn't fit the pocket
+        contracts = max(1, int(pocket_size // premium_per_contract))
+        cost = premium_per_contract * contracts
+        plans.append(OptionPlan(
+            strategy="long_call_gem", symbol=c.symbol,
+            action=f"Buy {contracts} {c.symbol} {strike:g}C ~{days}d for ${cost:,.0f}",
+            contracts=contracts, quote=q, est_premium=cost,
+            annualized_return=_annualized(premium_per_contract * contracts, cost, days),
+            rationale=(f"Upside candidate ({c.upside:+.1%} expected) — {otm_pct*100:.0f}% OTM call, "
+                       f"defined max loss ${cost:,.0f}, breakeven {strike + q.premium:g} "
+                       f"(+{(strike + q.premium) / spot - 1:.1%} from spot)."),
+            warnings=[
+                "max loss is the full premium — expect most of these to expire worthless",
+                "time decay (theta) works against you every day this is open",
+                f"needs {c.symbol} above {strike + q.premium:g} at expiry just to break even",
+            ],
         ))
     return sorted(plans, key=lambda p: -p.annualized_return)
 

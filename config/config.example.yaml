@@ -60,6 +60,12 @@ agent:
   #   ollama     — a LOCAL model you run yourself (free, private). See docs/AGENTS.md
   analyst_provider: heuristic
   analyst_model: llama3.1        # used when analyst_provider: ollama
+  # Session-aware live loop, run IN-PROCESS by the dashboard so both share one
+  # Portal (no state drift between what you see and what the loop evaluates).
+  # It records signals to data/forward_record.jsonl and NEVER places orders.
+  live:
+    autostart: true          # start with the dashboard; no separate command
+    interval_seconds: 300    # re-evaluate every 5 min while the market is open
   sizing:
     base_budget: 1000      # $ per order at full conviction, average volatility
     entry_threshold: 0.2   # skip trades weaker than this |conviction|

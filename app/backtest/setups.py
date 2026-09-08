@@ -63,6 +63,22 @@ SETUPS: dict[str, Setup] = {
         weights={"technical": 0.5, "forecast": 0.3, "macro": 0.2}, drawdown_halt=0.20,
         note="Adds the policy-cycle macro tilt on top of A — tests whether regime awareness helps.",
     ),
+    "F": Setup(
+        name="F: Trend+Forecast+LocalLLM, daily rebalance",
+        weights={"technical": 0.35, "forecast": 0.25, "analyst": 0.25, "macro": 0.15},
+        drawdown_halt=0.20, rebalance_days=1,
+        note=("Adds a local-LLM analyst rating on top of A, rebalanced daily (highest "
+              "frequency the daily-bar engine supports — not true intraday day-trading). "
+              "Requires --local-llm (Ollama must be running with the model pulled). "
+              "Confounds analyst-signal effect with rebalance-cadence effect — compare vs G."),
+    ),
+    "G": Setup(
+        name="G: Trend+Forecast+LocalLLM, weekly rebalance",
+        weights={"technical": 0.35, "forecast": 0.25, "analyst": 0.25, "macro": 0.15},
+        drawdown_halt=0.20, rebalance_days=5,
+        note=("Same weights as F but weekly rebalance (matches A/B/D/E's cadence) — "
+              "isolates the analyst signal's contribution from the cadence change."),
+    ),
 }
 
 

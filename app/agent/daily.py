@@ -114,6 +114,13 @@ class DailyAgent:
         from ..macro import MacroEngine
         macro = MacroEngine().symbol_biases(symbols)
 
+        # Curated-source views (Serenity on X, Professor Jiang on YouTube, your own).
+        # Age-decayed and point-in-time; a source that has said nothing about a
+        # symbol contributes nothing rather than a misleading neutral 0.
+        from ..intel.feeds import KNOWN_SOURCES, FeedStore
+        feeds = FeedStore()
+        curated = {src: feeds.biases(src, symbols) for src in KNOWN_SOURCES}
+
         convictions = []
         for s in symbols:
             fc = self.forecaster.predict(s, p.market.history(s))
@@ -124,6 +131,7 @@ class DailyAgent:
                 "sentiment": sentiment.get(s),
                 "macro": macro.get(s) if abs(macro.get(s, 0.0)) > 0.02 else None,
                 "geopolitical": geo_bias.get(s),
+                **{src: curated[src].get(s) for src in KNOWN_SOURCES},
             }
             conv = self.conviction.blend(s, {k: v for k, v in inputs.items() if v is not None})
             convictions.append(conv)
@@ -160,6 +168,13 @@ class DailyAgent:
                 # (trims to fund the focus / cut losers) are allowed anywhere.
                 if sig.side is Side.BUY and focus and conv.symbol not in focus:
                     continue
+                if sig.side is Side.BUY:
+                    from ..analytics.trade_filters import filter_buy
+                    # Live/confirm: sleeve must clear. Paper: still apply theme gate only.
+                    need_sleeve = p.settings.mode.value != 'paper'
+                    gate = filter_buy(conv.symbol, require_live_sleeve=need_sleeve)
+                    if not gate.allow:
+                        continue
                 # Exit clock: scale position size down as the deadline approaches.
                 sig.order_value *= derisk
                 if sig.order_value <= 0:
@@ -215,6 +230,12 @@ class DailyAgent:
                     continue
                 if sig.side is Side.BUY and focus and conv.symbol not in focus:
                     continue                                  # concentration: buys only in focus names
+                if sig.side is Side.BUY:
+                    from ..analytics.trade_filters import filter_buy
+                    need_sleeve = p.settings.mode.value != "paper"
+                    gate = filter_buy(conv.symbol, require_live_sleeve=need_sleeve)
+                    if not gate.allow:
+                        continue
                 sig.order_value = round(sig.order_value * derisk, 2)   # exit-clock scaling
                 if sig.order_value <= 0:
                     continue
@@ -232,6 +253,42 @@ class DailyAgent:
                 if sig.order_value > limits.max_order_value:
                     sig.order_value = limits.max_order_value
                     notes.append(f"capped at max order ${limits.max_order_value:,.0f}")
+                from ..analytics.exit_plans import build_exit_plan, classify_pool
+                from ..analytics.trade_filters import theme_allows_buy, sleeve_allows_live_buys as _sleeve_now
+                _sl = _sleeve_now()
+                _theme = theme_allows_buy(conv.symbol)
+                pool = classify_pool(
+                    conv.symbol, focus=focus, sleeve_usd=int(_sl.sleeve_usd or 0))
+                halt_pct = camp_status.get("drawdown_halt_pct")
+                if isinstance(halt_pct, (int, float)) and halt_pct > 1:
+                    halt_pct = halt_pct / 100.0
+                if not isinstance(halt_pct, (int, float)):
+                    halt_pct = 0.20
+                # Portfolio "overall up" telemetry for staircase scale-in gate
+                book_dd = None
+                if isinstance(camp_status.get("drawdown_pct"), (int, float)):
+                    book_dd = float(camp_status["drawdown_pct"])
+                    if book_dd > 1:  # stored as percent
+                        book_dd /= 100.0
+                sleeve_edge = None
+                try:
+                    import json
+                    from ..analytics.sleeve import STATUS_PATH
+                    if STATUS_PATH.exists():
+                        sleeve_edge = json.loads(
+                            STATUS_PATH.read_text(encoding="utf-8")
+                        ).get("edge_vs_hold_pp")
+                except Exception:
+                    sleeve_edge = None
+                exit_plan = build_exit_plan(
+                    conv.symbol, sig.side.value,
+                    pool=pool,
+                    theme_state=_theme.theme_state,
+                    derisk_factor=derisk,
+                    trailing_halt_pct=float(halt_pct),
+                    book_drawdown_pct=book_dd,
+                    sleeve_edge_pp=sleeve_edge,
+                )
                 orders.append({
                     "symbol": conv.symbol, "side": sig.side.value,
                     "order_value": sig.order_value,
@@ -239,15 +296,48 @@ class DailyAgent:
                     "limit_or_market": "market",
                     "conviction": round(conv.score, 3), "action": conv.action,
                     "focus": conv.symbol in focus,
+                    "pool": pool,
                     "held_shares": held.quantity if held else 0,
                     "rationale": conv.to_dict().get("contributions", {}),
                     "guardrail_notes": notes,
+                    "exit_plan": exit_plan,
                 })
+
+        from ..analytics.trade_filters import discovery_candidates, reentry_alerts, sleeve_allows_live_buys
+        from ..analytics.exit_plans import reentry_to_action
+        sleeve = sleeve_allows_live_buys()
+        raw_reentry = reentry_alerts(10)
+        reentry_actions = [reentry_to_action(r, focus=focus) for r in raw_reentry]
+        research_brief = {}
+        try:
+            from ..analytics.researcher import latest as research_latest
+            research_brief = research_latest()
+        except Exception as exc:
+            research_brief = {"error": str(exc)}
+        plays = {
+            "sleeve": {"allow_live_buys": sleeve.allow, "reason": sleeve.reason,
+                       "recommended_usd": sleeve.sleeve_usd},
+            "discovery_candidates": discovery_candidates(10),
+            "research_brief": {
+                "shortlist": (research_brief.get("discovery") or {}).get("shortlist"),
+                "mcp_queue": research_brief.get("mcp_queue"),
+                "as_of": research_brief.get("as_of"),
+                "written_to": research_brief.get("written_to"),
+            },
+            "reentry_alerts": raw_reentry,
+            "reentry_actions": reentry_actions,
+            "exit_plan_note": (
+                "Every order carries exit_plan. Core: thesis/theme invalidation + "
+                "campaign soft trim + book halt. Tactical: + time_stop + max_loss. "
+                "reentry_actions are REVIEW ONLY — not auto-orders."
+            ),
+        }
 
         plan = {
             "generated": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
             "mode": p.settings.mode.value,
             "campaign": camp_status,
+            "plays": plays,
             "guardrails": {
                 "drawdown_halt_active": halted,
                 "kill_switch": p.executor.killed,
@@ -267,9 +357,13 @@ class DailyAgent:
             "executor_instructions": (
                 "Execute ONLY the orders listed, as MARKET orders, through the robinhood-trading MCP. "
                 "First read the live account and positions; verify each order against them "
-                "(skip any SELL for shares not actually held). Show the user the full plan and get "
-                "explicit approval before placing anything. If drawdown_halt_active or kill_switch is "
-                "true, place NOTHING. Never exceed the limits above. Report every fill back to the user."
+                "(skip any SELL for shares not actually held). Show the user each order WITH its "
+                "exit_plan (pool, invalidation, soft_trim, hard_halt, and tactical time_stop/max_loss "
+                "if present) and get explicit approval before placing anything. "
+                "reentry_actions / discovery_candidates are REVIEW ONLY — do not turn them into orders "
+                "unless the user explicitly approves a new buy. "
+                "If drawdown_halt_active or kill_switch is true, place NOTHING. "
+                "Never exceed the limits above. Report every fill back to the user."
             ),
         }
         if halted:

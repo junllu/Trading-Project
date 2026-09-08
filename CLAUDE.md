@@ -73,6 +73,36 @@ When the user asks you to run the trading routine / execute today's plan:
 - **One test first.** The very first time you ever place a real order, make it a
   single share and confirm it before anything larger.
 
+## Where autonomy ends: draw the line by REVERSIBILITY, not importance
+
+The existing rules govern orders. They said nothing about overwriting
+`config/holdings.yaml`, deleting a data file, or rotating a credential — all of
+which are unrecoverable and none of which are orders. So the line is drawn by
+whether an action can be undone, not by how big it feels:
+
+**Finish without asking** — research, screen, score, backtest, simulate, draft,
+organize, snapshot, report, and *stage*. All reversible; none of it needs a yes.
+
+**Park for approval** — place/cancel/modify an order, exercise an option, sell,
+transfer, purchase, delete, overwrite, rotate a credential, change a permission,
+publish, send a message, accept terms. **Anything unclassified parks** — an
+unknown action is treated as irreversible.
+
+Two failure modes this rules out, in both directions:
+
+- *Stopping at 10%.* Do not return early because step 9 will need approval.
+  Complete every reversible step, then stage the irreversible one with its exact
+  proposed action visible. An agent that halts at the first future gate is just
+  a slower way of doing the work by hand.
+- *Nothing waiting.* Confidence is not authorisation. A clean run does not
+  promote an action across the line.
+
+`python -m app.agent.autonomy` prints the current line and every routine's
+level. Autonomy is a **runtime privilege**: routines are promoted only on
+evidence (5+ clean runs at a 100% pass rate) and are **demoted automatically**
+when the pass rate decays below 80%. A hand-run cycle proves the code executes;
+it never proves the schedule fires.
+
 ## First-run safety drill (do this once, now)
 
 Before any automated flow, verify the connection is sane:

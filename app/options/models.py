@@ -34,13 +34,13 @@ class OptionQuote:
 
 @dataclass
 class OptionPlan:
-    """A concrete, sized income-strategy suggestion for review."""
-    strategy: str                 # "covered_call" | "cash_secured_put" | "sell_the_news"
+    """A concrete, sized option-strategy suggestion for review."""
+    strategy: str                 # "covered_call" | "cash_secured_put" | "sell_the_news" | "long_call_gem"
     symbol: str
     action: str                   # human-readable instruction
     contracts: int
     quote: OptionQuote | None = None
-    est_premium: float = 0.0      # total $ credit for the position
+    est_premium: float = 0.0      # total $ credit (income strategies) or cost (long_call_gem)
     annualized_return: float = 0.0
     rationale: str = ""
     warnings: list[str] = field(default_factory=list)

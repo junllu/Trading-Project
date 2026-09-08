@@ -1,0 +1,29 @@
+# Curated analyst sources feeding the conviction engine's per-source slots.
+#
+# `source` MUST match a slot in app/intel/feeds.py KNOWN_SOURCES
+# (serenity | professor_jiang | personal) and a weight key in
+# app/analytics/conviction.py DEFAULT_WEIGHTS.
+#
+# youtube: set `channel` to the UC... channel id. Handle (@name) lookups are
+#   blocked by YouTube for non-browser clients — open the channel in a browser,
+#   View Source, search for "channelId" to get the UC... id.
+# x: no unauthenticated read path exists (WebFetch returns HTTP 402), so these
+#   are tracked here but staged manually (paste, or the Chrome extension against
+#   your logged-in session).
+
+sources:
+  # "Predictive History" (@PredictiveHistory) — psycho-history / geopolitics.
+  # NOTE: this channel makes NO per-symbol calls. Sampled transcripts (33k and
+  # 159k chars) contained zero cashtags and no market vocabulary; content is
+  # geopolitical analysis and literature seminars. Treat as a REGIME/geopolitical
+  # source, not a stock-picking one — see conviction wiring note below.
+  - source: professor_jiang
+    kind: youtube
+    channel: UC11aHtNnc5bEPLI4jf6mnYg
+
+  # Serenity (@aleabitoreddit) — AI/semi supply-chain research, posts cashtags.
+  # This one IS per-symbol shaped. No unauthenticated read path (HTTP 402), so
+  # staged via the Chrome extension against a logged-in session, or pasted.
+  - source: serenity
+    kind: x
+    handle: "@aleabitoreddit"
