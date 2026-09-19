@@ -48,7 +48,16 @@ class OllamaAnalyst(ClaudeAnalyst):
             ],
             "stream": False,
             "format": "json",
-            "options": {"temperature": 0.2},
+            # TEMPERATURE 0, NOT 0.2. This rating carries 0.25 weight in the
+            # conviction blend, and conviction sets position size — so a
+            # sampled rating means the same inputs can produce a different
+            # order value on a re-run. Two things break as a result: the
+            # forward record cannot be replayed to explain a bad trade, and
+            # calibration.py cannot score a probability that is not
+            # reproducible. Rating a symbol is a judgement task, not a
+            # creative one; llm_extract.py already reaches temperature 0 for
+            # the same reason.
+            "options": {"temperature": 0.0},
         }
         r = requests.post(f"{self.host}/api/chat", json=payload, timeout=120)
         r.raise_for_status()

@@ -30,7 +30,7 @@ carries a date-known and a source.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 # Measured on S&P 500 annual returns, 1951-2026 (n=19 per bucket).
 CYCLE_STATS = {
@@ -152,15 +152,285 @@ def m2_liquidity(d: date | None = None, quartile_hot: float = 8.38,
                            d.isoformat())
 
 
+# --- Bitcoin halving cycle -------------------------------------------------
+# Supply issuance halves roughly every 210,000 blocks (~4 years). These four
+# dates are protocol events, not estimates; the fifth is a block-height
+# projection and moves with hash rate, so it is stored separately.
+HALVINGS = ["2012-11-28", "2016-07-09", "2020-05-11", "2024-04-19"]
+NEXT_HALVING_EST = "2028-04-20"          # block 1,050,000, projected
+HALVING_CYCLE_DAYS = 1458                 # ~4 years, the design target
+
+# THE SAMPLE PROBLEM, STATED UP FRONT.
+#
+# There are three COMPLETED halving cycles. Three. Every "halving → bull market"
+# claim in circulation rests on n=3, and two of those three coincided with the
+# largest monetary expansion in modern history — the same M2 impulse this module
+# measures separately. The two are not independent, so attributing the move to
+# issuance is unfalsifiable with the data that exists.
+#
+# This project deleted app/macro/timeline.py for exactly this sin: hard-coding
+# "ai_boom 2023-2027: semiconductors +0.6", a narrative written after the race,
+# whose edge vanished out of sample. So the halving contributes a bias of ZERO.
+# It reports WHERE IN THE CYCLE we are, with measured returns and their sample
+# size attached, and lets the operator decide. When n reaches something a
+# statistician would accept, revisit — not before.
+HALVING_CONTRIBUTES_BIAS = False
+
+
+def _halving_bounds(d: date) -> tuple[date, date, int]:
+    """(last halving, next halving, index) around date d."""
+    hs = [datetime.strptime(x, "%Y-%m-%d").date() for x in HALVINGS]
+    nxt = datetime.strptime(NEXT_HALVING_EST, "%Y-%m-%d").date()
+    prior = [h for h in hs if h <= d]
+    last = prior[-1] if prior else hs[0]
+    following = [h for h in hs + [nxt] if h > d]
+    return last, (following[0] if following else nxt), len(prior)
+
+
+def halving_quartile(d: date | None = None) -> int:
+    """1-4: which quarter of the issuance cycle d sits in."""
+    d = d or date.today()
+    last, _nxt, _i = _halving_bounds(d)
+    days = (d - last).days
+    return min(4, max(1, days * 4 // HALVING_CYCLE_DAYS + 1))
+
+
+def halving_cycle(d: date | None = None) -> MacroSignal:
+    """Position in the issuance cycle. Deliberately contributes no bias."""
+    d = d or date.today()
+    last, nxt, idx = _halving_bounds(d)
+    since, until = (d - last).days, (nxt - d).days
+    q = halving_quartile(d)
+    projected = nxt.isoformat() == NEXT_HALVING_EST
+    return MacroSignal(
+        name="halving_cycle",
+        value=0.0 if not HALVING_CONTRIBUTES_BIAS else 0.0,
+        detail=(f"halving #{idx} was {last} ({since}d ago), next "
+                f"{nxt}{' (projected)' if projected else ''} in {until}d — "
+                f"quartile {q}/4. Contributes NO bias: n=3 completed cycles, "
+                f"two of them inside the same M2 expansion, so issuance cannot "
+                f"be separated from liquidity."),
+        as_of=d.isoformat())
+
+
+def halving_history(symbol: str = "BTC-USD", horizon_days: int = 90) -> dict:
+    """Measured forward returns by cycle quartile, with n. Never asserted.
+
+    Reported so the operator can see how thin the evidence is rather than
+    being told a conclusion drawn from it.
+    """
+    try:
+        import warnings
+        warnings.filterwarnings("ignore")
+        import yfinance as yf
+        df = yf.download(symbol, start="2014-09-01", progress=False, auto_adjust=True)
+        if df is None or df.empty:
+            return {"error": "no data"}
+        if hasattr(df.columns, "nlevels") and df.columns.nlevels > 1:
+            df.columns = df.columns.get_level_values(0)
+        closes = [(i.date(), float(r["Close"])) for i, r in df.iterrows()]
+    except Exception as exc:
+        return {"error": f"{type(exc).__name__}: {exc}"}
+
+    by_q: dict[int, list[float]] = {1: [], 2: [], 3: [], 4: []}
+    idx = {dt: c for dt, c in closes}
+    dates = [dt for dt, _ in closes]
+    for i, (dt, c) in enumerate(closes):
+        fwd_date = dt + timedelta(days=horizon_days)
+        fwd = next((idx[x] for x in dates[i:] if x >= fwd_date), None)
+        if fwd is None or c <= 0:
+            continue
+        by_q[halving_quartile(dt)].append(fwd / c - 1.0)
+
+    out = {}
+    for q, vals in by_q.items():
+        if not vals:
+            out[q] = {"n_days": 0}
+            continue
+        vals.sort()
+        out[q] = {
+            "n_days": len(vals),
+            "n_independent_cycles": len(HALVINGS) - 1,
+            "mean_pct": round(sum(vals) / len(vals) * 100, 1),
+            "median_pct": round(vals[len(vals) // 2] * 100, 1),
+            "positive_pct": round(sum(1 for v in vals if v > 0) / len(vals) * 100),
+        }
+    return {
+        "symbol": symbol, "horizon_days": horizon_days, "by_quartile": out,
+        "caveat": ("Overlapping daily windows inflate n_days enormously: with a "
+                   "90-day horizon each cycle contributes ~4 independent "
+                   "observations, not ~365. n_independent_cycles is the honest "
+                   "count and it is 3."),
+    }
+
+
+# Measured, not folklore. See halving_event_study(): across the three cycles with
+# price data the PEAK lands at +525, +546 and +535 days — a 21-day spread. The
+# GAIN to that peak decays by roughly 4x each cycle (+2895%, +685%, +95%), which
+# is what makes the pattern untradeable even though the timing looks reliable:
+# a rule fitted on the first two cycles would have been sized ~7x too large for
+# the third. Window kept short so it cannot catch the NEXT cycle's rise, which
+# is what made a naive 4-year window report the 2020 peak at +1402d.
+MEASURED_PEAK_DAYS = (525, 546, 535)
+PEAK_SEARCH_WINDOW_DAYS = 700
+
+
+def halving_event_study(symbol: str = "BTC-USD") -> dict:
+    """Peak timing and magnitude per cycle, plus where today sits.
+
+    Reports each cycle SEPARATELY on purpose. A mean across three events with a
+    30x spread in magnitude describes none of them, and averaging is how the
+    decay — the only part with an obvious economic story — gets hidden.
+    """
+    try:
+        import warnings
+        warnings.filterwarnings("ignore")
+        import yfinance as yf
+        df = yf.download(symbol, start="2014-09-01", progress=False, auto_adjust=True)
+        if df is None or df.empty:
+            return {"error": "no data"}
+        if hasattr(df.columns, "nlevels") and df.columns.nlevels > 1:
+            df.columns = df.columns.get_level_values(0)
+        px = {i.date(): float(r["Close"]) for i, r in df.iterrows()}
+    except Exception as exc:
+        return {"error": f"{type(exc).__name__}: {exc}"}
+
+    days = sorted(px)
+    today = days[-1]
+    cycles = []
+    for h in HALVINGS:
+        h0 = datetime.strptime(h, "%Y-%m-%d").date()
+        end = min(h0 + timedelta(days=PEAK_SEARCH_WINDOW_DAYS), today)
+        win = [(d, px[d]) for d in days if h0 <= d <= end]
+        if len(win) < 200:
+            cycles.append({"halving": h, "status": "no price history"})
+            continue
+        base = win[0][1]
+        pk_d, pk_v = max(win, key=lambda x: x[1])
+        after = [(d, px[d]) for d in days
+                 if pk_d < d <= min(pk_d + timedelta(days=400), today)]
+        tr = min(after, key=lambda x: x[1]) if after else None
+        cycles.append({
+            "halving": h, "status": "measured",
+            "peak_date": pk_d.isoformat(), "peak_at_days": (pk_d - h0).days,
+            "gain_to_peak_pct": round((pk_v / base - 1) * 100),
+            "drawdown_after_peak_pct": round((tr[1] / pk_v - 1) * 100) if tr else None,
+            "trough_date": tr[0].isoformat() if tr else None,
+        })
+
+    last = datetime.strptime(HALVINGS[-1], "%Y-%m-%d").date()
+    cur_win = [(d, px[d]) for d in days if last <= d <= today]
+    base = cur_win[0][1]
+    pk_d, pk_v = max(cur_win, key=lambda x: x[1])
+    now = {
+        "days_since_halving": (today - last).days,
+        "price": round(px[today], 2),
+        "vs_halving_day_pct": round((px[today] / base - 1) * 100),
+        "cycle_peak_date": pk_d.isoformat(),
+        "cycle_peak_at_days": (pk_d - last).days,
+        "from_cycle_peak_pct": round((px[today] / pk_v - 1) * 100),
+        "days_since_cycle_peak": (today - pk_d).days,
+    }
+    return {"symbol": symbol, "cycles": cycles, "now": now,
+            "measured_peak_days": list(MEASURED_PEAK_DAYS),
+            "caveat": ("n=3. The timing is tight and the magnitude is not: gains to "
+                       "peak ran +2895%, +685%, +95%. Any rule sized on the earlier "
+                       "cycles is sized wrong for the next one, and three events "
+                       "cannot distinguish decay from noise.")}
+
+
+# Peak -> trough offsets from the two COMPLETED post-peak declines:
+#   2017-12-16 -> 2018-12-15 = 364d      2021-11-08 -> 2022-11-21 = 378d
+# The 2024 cycle's decline is still running and is therefore not an observation
+# yet — including an unfinished drawdown would bias the mean toward whatever
+# today happens to be.
+MEASURED_TROUGH_OFFSET_DAYS = (364, 378)
+
+
+def halving_projection(d: date | None = None) -> dict:
+    """Where the issuance clock points next, with the sample stated on every line.
+
+    A projection from three events is an ARITHMETIC RESTATEMENT of those events,
+    not a forecast, and it is labelled that way. The value is not the date — it
+    is seeing how the date sits against the campaign deadline, which is a
+    question the cycle folklore never asks.
+    """
+    d = d or date.today()
+    last = datetime.strptime(HALVINGS[-1], "%Y-%m-%d").date()
+    nxt = datetime.strptime(NEXT_HALVING_EST, "%Y-%m-%d").date()
+    lo, hi = min(MEASURED_PEAK_DAYS), max(MEASURED_PEAK_DAYS)
+    mean_off = round(sum(MEASURED_PEAK_DAYS) / len(MEASURED_PEAK_DAYS))
+    since = (d - last).days
+
+    # The current cycle's peak is HISTORY, not a projection — every measured
+    # offset is already behind us. Presenting it as "upcoming" would be the
+    # single most misleading thing this function could do.
+    current_peak_passed = since > hi
+    cur = {
+        "halving": last.isoformat(),
+        "days_since": since,
+        "peak_window": [(last + timedelta(days=lo)).isoformat(),
+                        (last + timedelta(days=hi)).isoformat()],
+        "peak_already_passed": current_peak_passed,
+    }
+    if current_peak_passed:
+        pk = last + timedelta(days=mean_off)
+        t_lo = pk + timedelta(days=min(MEASURED_TROUGH_OFFSET_DAYS))
+        t_hi = pk + timedelta(days=max(MEASURED_TROUGH_OFFSET_DAYS))
+        cur["trough_window"] = [t_lo.isoformat(), t_hi.isoformat()]
+        cur["trough_window_n"] = len(MEASURED_TROUGH_OFFSET_DAYS)
+        cur["in_trough_window"] = t_lo <= d <= t_hi
+
+    nxt_peak = nxt + timedelta(days=mean_off)
+    campaign_deadline = date(2027, 12, 31)
+    return {
+        "as_of": d.isoformat(),
+        "peak_offset_days": {"min": lo, "mean": mean_off, "max": hi,
+                             "n": len(MEASURED_PEAK_DAYS)},
+        "current_cycle": cur,
+        "next_cycle": {
+            "halving_est": nxt.isoformat(),
+            "halving_is_projected": True,
+            "days_to_halving": (nxt - d).days,
+            "projected_peak": nxt_peak.isoformat(),
+            "projected_peak_window": [(nxt + timedelta(days=lo)).isoformat(),
+                                      (nxt + timedelta(days=hi)).isoformat()],
+            "days_to_projected_peak": (nxt_peak - d).days,
+        },
+        "vs_campaign": {
+            "deadline": campaign_deadline.isoformat(),
+            "next_peak_after_deadline_days": (nxt_peak - campaign_deadline).days,
+            "verdict": ("the next issuance-cycle peak lands AFTER the campaign "
+                        "deadline — this clock offers the campaign nothing"
+                        if nxt_peak > campaign_deadline else
+                        "the next peak falls inside the campaign window"),
+        },
+        "caveat": ("Projection = mean of three measured offsets applied to a "
+                   "block-height estimate. n=3 on timing, n=2 on the trough. The "
+                   "gain to each peak decayed ~4x per cycle (+2895%, +685%, +95%), "
+                   "so the DATE is the only part with any consistency — never the "
+                   "magnitude."),
+    }
+
+
 def all_signals(d: date | None = None, with_m2: bool = True) -> list[MacroSignal]:
     out = [presidential_cycle(d)]
     if with_m2:
         out.append(m2_liquidity(d))
+    out.append(halving_cycle(d))
     return out
 
 
+# Signals that report position but deliberately contribute no bias. They must be
+# excluded from the average, not averaged in as zeros: a 0.0 term is not neutral,
+# it drags the blend toward zero and silently weakens every real signal in it.
+# Adding the halving cycle as a zero would have cut the existing macro tilt by a
+# third while looking like an addition.
+NON_CONTRIBUTING = {"halving_cycle"}
+
+
 def blended_bias(d: date | None = None, with_m2: bool = True) -> float:
-    sigs = all_signals(d, with_m2)
+    sigs = [s for s in all_signals(d, with_m2) if s.name not in NON_CONTRIBUTING]
     return sum(s.value for s in sigs) / len(sigs) if sigs else 0.0
 
 

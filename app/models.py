@@ -79,6 +79,13 @@ class Order:
     status: OrderStatus = OrderStatus.PENDING
     filled_price: Optional[float] = None
     reason: Optional[str] = None  # rejection / status detail
+    # Which sleeve asked for this. Two very different engines route through one
+    # executor — the conviction/campaign agent and the config-driven technical
+    # strategies — and their fills land in one blotter. Without attribution the
+    # record cannot answer "is the conviction engine any good", because its
+    # trades are averaged in with sma_crossover's. Carried as a field rather
+    # than parsed back out of `reason`, which is prose.
+    strategy: str = "unknown"
     ts: float = field(default_factory=time.time)
 
     def notional(self, ref_price: float) -> float:

@@ -1,0 +1,177 @@
+<title>Live Monitor</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2128; --line:#30363d;
+    --fg:#e6edf3; --muted:#8b949e; --green:#3fb950; --red:#f85149;
+    --amber:#d29922; --accent:#58a6ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
+  header{display:flex;align-items:center;gap:10px;padding:10px 16px;
+         border-bottom:1px solid var(--line);background:var(--panel);
+         position:sticky;top:0;z-index:5;flex-wrap:wrap}
+  h1{font-size:14px;margin:0;letter-spacing:.02em}
+  .pill{border:1px solid var(--line);border-radius:99px;padding:2px 9px;
+        font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+  main{padding:14px 16px;display:grid;gap:14px;
+       grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px}
+  .card.wide{grid-column:1/-1}
+  h2{font-size:11px;text-transform:uppercase;letter-spacing:.07em;
+     color:var(--muted);margin:0 0 8px;font-weight:600}
+  table{width:100%;border-collapse:collapse}
+  th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.05em;
+     color:var(--muted);font-weight:600;padding:4px 6px;border-bottom:1px solid var(--line)}
+  td{padding:4px 6px;border-bottom:1px solid #21262d}
+  .num{text-align:right;font-variant-numeric:tabular-nums}
+  .kpi{display:flex;gap:18px;flex-wrap:wrap}
+  .kpi div span{display:block}
+  .kpi .v{font-size:18px;font-variant-numeric:tabular-nums}
+  .kpi .l{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  .up{color:var(--green)} .down{color:var(--red)} .warn{color:var(--amber)}
+  .muted{color:var(--muted)}
+  .banner{grid-column:1/-1;border:1px solid var(--amber);border-radius:8px;
+          padding:9px 12px;background:#1f1a0d;color:var(--amber);font-size:12px}
+  a{color:var(--accent)}
+  .scroll{max-height:340px;overflow:auto}
+</style>
+
+<header>
+  <h1>◉ Live Monitor</h1>
+  <span class="pill" id="sess">—</span>
+  <span class="pill" id="loop">—</span>
+  <span class="pill" id="clock">—</span>
+  <span style="flex:1"></span>
+  <span class="muted" id="updated" style="font-size:11px"></span>
+  <a href="/" style="font-size:11px">full dashboard →</a>
+</header>
+
+<main>
+  <!-- The single most important thing on this page. Every row below is an
+       INTENT the agent recorded, not a fill. Stating it once, permanently, at
+       the top beats hoping the reader remembers which column meant what. -->
+  <div class="banner" id="intentBanner">
+    Everything below is what the agent <b>would</b> do. Nothing here has been executed
+    — the executor is confirm-only and no order reaches a broker without explicit approval.
+  </div>
+
+  <section class="card">
+    <h2>Recorder</h2>
+    <div class="kpi">
+      <div><span class="v" id="cycles">—</span><span class="l">cycles</span></div>
+      <div><span class="v" id="rows">—</span><span class="l">record rows</span></div>
+      <div><span class="v" id="errs">—</span><span class="l">errors</span></div>
+      <div><span class="v" id="equity">—</span><span class="l">equity</span></div>
+    </div>
+    <div class="muted" id="loopNote" style="margin-top:8px;font-size:11px"></div>
+  </section>
+
+  <section class="card">
+    <h2>Guardrails</h2>
+    <div class="kpi">
+      <div><span class="v" id="halted">—</span><span class="l">drawdown halt</span></div>
+      <div><span class="v" id="dd">—</span><span class="l">drawdown</span></div>
+      <div><span class="v" id="intents">—</span><span class="l">intents, last cycle</span></div>
+    </div>
+  </section>
+
+  <section class="card wide">
+    <h2>Latest decision — top convictions</h2>
+    <table><thead><tr>
+      <th>Symbol</th><th class="num">Score</th><th>Action</th><th class="num">Price</th>
+    </tr></thead><tbody id="convs"></tbody></table>
+  </section>
+
+  <section class="card wide">
+    <h2>Intended orders — last cycle <span class="muted">(not placed)</span></h2>
+    <table><thead><tr>
+      <th>Symbol</th><th>Side</th><th class="num">$ value</th><th class="num">Conviction</th>
+    </tr></thead><tbody id="intentRows"></tbody></table>
+  </section>
+
+  <section class="card wide">
+    <h2>Cycle history</h2>
+    <div class="scroll">
+      <table><thead><tr>
+        <th>Recorded (ET)</th><th>Session</th><th class="num">Equity</th>
+        <th class="num">Intents</th><th>Top</th><th>Halted</th><th>Executed</th>
+      </tr></thead><tbody id="hist"></tbody></table>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const money = v => v == null ? '—' : '$' + Math.round(v).toLocaleString();
+
+async function tick(){
+  let d;
+  try { d = await (await fetch('/api/monitor')).json(); }
+  catch(e){ $('updated').textContent = 'fetch failed — retrying'; return; }
+
+  const s = d.session || {}, l = d.live || {};
+  $('sess').textContent = (s.session || '—') + (s.is_open ? ' · OPEN' : ' · closed');
+  $('sess').style.color = s.is_open ? 'var(--green)' : 'var(--muted)';
+
+  // Tripped is not the same as stopped, and the difference decides whether a
+  // human needs to act. Colour AND word carry it.
+  const tripped = l.tripped, running = l.running;
+  $('loop').textContent = tripped ? 'RECORDER TRIPPED' : (running ? 'recorder running' : 'recorder stopped');
+  $('loop').style.color = tripped ? 'var(--red)' : (running ? 'var(--green)' : 'var(--amber)');
+
+  $('clock').textContent = s.is_open ? ('closes ' + (s.next_close || '').slice(11,16))
+                                     : ('opens ' + (s.next_open || '').slice(5,16));
+  $('cycles').textContent = l.cycles ?? '—';
+  $('rows').textContent = (d.record && d.record.rows) ?? '—';
+  $('errs').textContent = l.errors ?? '—';
+  $('errs').className = 'v' + ((l.errors > 0) ? ' down' : '');
+
+  const latest = d.latest;
+  $('equity').textContent = latest ? money(latest.equity) : '—';
+  $('halted').textContent = latest ? (latest.halted ? 'ACTIVE' : 'clear') : '—';
+  $('halted').className = 'v' + (latest && latest.halted ? ' down' : ' up');
+  $('dd').textContent = latest && latest.drawdown_pct != null
+      ? latest.drawdown_pct.toFixed(1) + '%' : '—';
+  $('intents').textContent = latest ? (latest.intended_orders || []).length : '—';
+
+  // last_cycle is the whole recorded row, not a timestamp — printing it raw
+  // renders "[object Object]". Show when it happened and what it decided.
+  const lc = l.last_cycle;
+  const lcText = lc && typeof lc === 'object'
+      ? `last cycle ${(lc.recorded_at_et||'').replace('T',' ').slice(11,19)} · `
+        + `${(lc.intended_orders||[]).length} intent(s)`
+      : (lc ? 'last cycle ' + lc : '');
+  $('loopNote').textContent = l.last_error ? ('last error: ' + l.last_error)
+                                           : (lcText || d.note || '');
+
+  const prices = (latest && latest.prices) || {};
+  $('convs').innerHTML = ((latest && latest.convictions) || []).slice(0,12).map(c => `
+    <tr><td><b>${c.symbol}</b></td>
+        <td class="num ${c.score>=0?'up':'down'}">${c.score>0?'+':''}${c.score}</td>
+        <td class="${c.score>=0?'up':'down'}">${c.action}</td>
+        <td class="num muted">${prices[c.symbol] != null ? prices[c.symbol] : '—'}</td></tr>`
+  ).join('') || '<tr><td colspan="4" class="muted">no cycle recorded yet</td></tr>';
+
+  $('intentRows').innerHTML = ((latest && latest.intended_orders) || []).map(o => `
+    <tr><td><b>${o.symbol}</b></td>
+        <td class="${o.side==='buy'?'up':'down'}">${o.side}</td>
+        <td class="num">$${Number(o.order_value).toFixed(2)}</td>
+        <td class="num ${o.conviction>=0?'up':'down'}">${o.conviction>0?'+':''}${o.conviction}</td></tr>`
+  ).join('') || '<tr><td colspan="4" class="muted">no intents this cycle</td></tr>';
+
+  $('hist').innerHTML = (d.history || []).slice().reverse().map(h => `
+    <tr><td class="muted">${(h.at||'').replace('T',' ').slice(0,19)}</td>
+        <td>${h.session||'—'}</td>
+        <td class="num">${money(h.equity)}</td>
+        <td class="num">${h.intents}</td>
+        <td>${h.top||'—'}</td>
+        <td class="${h.halted?'down':'muted'}">${h.halted?'HALT':'—'}</td>
+        <td class="muted">${h.executed?'yes':'no'}</td></tr>`
+  ).join('') || '<tr><td colspan="7" class="muted">no history</td></tr>';
+
+  $('updated').textContent = 'updated ' + new Date().toLocaleTimeString();
+}
+tick();
+setInterval(tick, 20000);
+</script>

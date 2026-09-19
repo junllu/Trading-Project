@@ -5,6 +5,8 @@ UI, a future mobile client, or a CLI.
 """
 from __future__ import annotations
 
+import time
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -305,6 +307,82 @@ def exits():
     return exit_report()
 
 
+@router.get("/monitor")
+def monitor(limit: int = 40):
+    """Live-session monitor: what the agent is deciding, right now.
+
+    Deliberately narrow. The main dashboard answers "how is everything"; this
+    answers "is it running, and what did it just decide" during a session. It
+    reads the forward record — the ARTEFACT — rather than the loop's in-memory
+    state, so it stays truthful when the loop is down instead of going blank.
+
+    The distinction that matters on this page: `intended_orders` are what the
+    agent WOULD do. Nothing here has been executed — `executed` is on every row
+    so a reader can never mistake a recorded intent for a fill.
+    """
+    import json as _json
+    from ..agent.live_loop import RECORD_PATH, report as live_report
+    from ..data.market_hours import state as session_state
+
+    rows = []
+    if RECORD_PATH.exists():
+        for line in RECORD_PATH.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                rows.append(_json.loads(line))
+            except _json.JSONDecodeError:
+                continue
+    rows = rows[-limit:]
+
+    live: dict = {}
+    try:
+        p = portal.ensure_built()
+        live = p.live.status() if getattr(p, "live", None) else {}
+    except Exception as exc:
+        live = {"error": f"{type(exc).__name__}: {exc}"}
+
+    latest = rows[-1] if rows else None
+    return {
+        "session": session_state().to_dict(),
+        "live": live,
+        "record": live_report(),
+        "latest": latest,
+        "history": [
+            {"at": r.get("recorded_at_et"), "session": r.get("session"),
+             "equity": r.get("equity"), "halted": r.get("halted"),
+             "intents": len(r.get("intended_orders") or []),
+             "top": (r.get("convictions") or [{}])[0].get("symbol"),
+             "executed": r.get("executed", False)}
+            for r in rows
+        ],
+        "note": ("intended_orders are INTENTS, never fills. Nothing on this page "
+                 "has been executed — the executor is confirm-only and no order "
+                 "reaches a broker without explicit approval."),
+    }
+
+
+@router.get("/doctrine")
+def doctrine():
+    """Structural theses graded against published series, not against price.
+
+    Slow: it reads FRED (cached 12h on disk). Poll on a long interval — the
+    fastest indicator here is a daily credit spread and most are monthly or
+    quarterly, so anything more frequent is re-rendering the same numbers.
+    """
+    from ..macro.doctrine import report as doctrine_report
+    from ..macro.signals import halving_projection
+    out = doctrine_report()
+    # The issuance clock rides along: it is macro CONTEXT on the same slow poll,
+    # not a decision, so it belongs beside the doctrines rather than in the
+    # attack/defend queue where every row implies something to do.
+    try:
+        out["cycle_clock"] = halving_projection()
+    except Exception as exc:
+        out["cycle_clock"] = {"error": f"{type(exc).__name__}: {exc}"}
+    return out
+
+
 @router.get("/intraday")
 def intraday(symbols: str = ""):
     """Minute-bar coverage, per-session excursions, and send-timing.
@@ -429,6 +507,180 @@ def research():
     from ..analytics.researcher import latest
     return latest() or {"empty": True,
                         "note": "no brief yet — the researcher runs on a daily cadence"}
+
+
+@router.get("/training/account")
+def training_account():
+    """What the simulated account is actually WORTH, marked at live prices.
+
+    The blotter answers "what was traded"; this answers "what is it worth now",
+    which is the question fills and notional cannot. Realized P&L alone reads
+    $0 here because the seeded holdings were sold without a matching buy in the
+    record — so the bottom line has to include what is still open, marked to
+    the live feed rather than to cost.
+    """
+    from ..engine import blotter
+    from ..portfolio import sim_account
+
+    p = portal.ensure_built()
+    paper = p.brokers.get("paper")
+    if paper is None:
+        return {"available": False, "why": "no paper broker"}
+
+    # Prime the live feed so the mark is current rather than whatever was last
+    # quoted — a stale mark is the whole failure this page exists to avoid.
+    syms = [pos.symbol for pos in paper.get_positions()]
+    primer = getattr(p.quote_source, "prime", None)
+    if callable(primer) and syms:
+        try:
+            primer(syms)
+        except Exception:
+            pass
+    # prime() only warms the quote SOURCE. MarketData keeps its own `_last`
+    # cache and its is_real() flags, and both are populated by quoting — so
+    # without this refresh 28 of 29 positions read as unpriced and the account
+    # totalled $1,714 against a book worth $134,000.
+    if syms:
+        p.market.refresh(syms)
+
+    positions, invested, cost_total, unpriced = [], 0.0, 0.0, []
+    # Inherited vs earned. Seeded names came with the book; anything else the
+    # simulator chose to open. Averaging them answers neither question — the
+    # unrealized on a seeded winner says nothing about whether the strategy is
+    # any good, and burying the strategy's own positions inside it hides the
+    # only number that does.
+    seeded_set = set(sim_account.inception().get("seeded_symbols") or [])
+    seeded_val = seeded_cost = acquired_val = acquired_cost = 0.0
+    for pos in paper.get_positions():
+        real = p.market.is_real(pos.symbol)
+        q = p.market.last(pos.symbol)
+        px = q.price if q else None
+        if px is None or not real:
+            unpriced.append(pos.symbol)
+            continue
+        value = pos.quantity * px
+        cost = pos.quantity * pos.avg_price
+        invested += value
+        cost_total += cost
+        is_seeded = pos.symbol in seeded_set
+        if is_seeded:
+            seeded_val += value
+            seeded_cost += cost
+        else:
+            acquired_val += value
+            acquired_cost += cost
+        pct = (px / pos.avg_price - 1) * 100 if pos.avg_price else None
+
+        # PLAN vs REALITY. The plan was written at entry; this is where the
+        # position actually sits against it. Without the comparison the plan is
+        # decoration — a stop nobody checks and targets nobody scores.
+        plan = None
+        try:
+            from ..agent import position_plans
+            rec = position_plans.get(pos.symbol)
+        except Exception:
+            rec = None
+        if rec:
+            stop_price = rec.get("stop_price")
+            targets = [t.get("gain_pct") for t in (rec.get("targets") or [])]
+            hit = [g for g in targets if pct is not None and pct >= g]
+            room = ((px / stop_price - 1) * 100
+                    if stop_price and px and stop_price > 0 else None)
+            plan = {
+                "entry_price": rec.get("entry_price"),
+                "stop_pct": rec.get("stop_pct"),
+                "stop_price": stop_price,
+                "stop_basis": rec.get("stop_basis"),
+                "targets_pct": targets,
+                "targets_hit": hit,
+                "next_target_pct": next((g for g in targets
+                                         if pct is None or pct < g), None),
+                "room_to_stop_pct": round(room, 2) if room is not None else None,
+                # Drifting below the recorded entry is not the same as being
+                # underwater against an average that later adds moved.
+                "vs_entry_pct": (round((px / rec["entry_price"] - 1) * 100, 2)
+                                 if rec.get("entry_price") else None),
+                "status": ("STOP BREACHED" if stop_price and px <= stop_price
+                           else ("TARGET " + str(max(hit)) + "%" if hit else "in plan")),
+            }
+
+        positions.append({
+            "symbol": pos.symbol, "quantity": round(pos.quantity, 4),
+            "avg_price": round(pos.avg_price, 4), "last": round(px, 4),
+            "value": round(value, 2),
+            "unrealized": round(value - cost, 2),
+            "unrealized_pct": round(pct, 2) if pct is not None else None,
+            "source": (p.quote_source.provenance(pos.symbol) or {}).get("source"),
+            "plan": plan,
+            "origin": "seeded" if is_seeded else "sim",
+        })
+
+    realized = blotter.realized()
+    positions.sort(key=lambda x: -abs(x["unrealized"]))
+
+    total_value = paper.cash + invested
+    start = sim_account.inception()
+    start_value = float(start.get("value") or 0.0)
+    pnl = total_value - start_value if start_value else None
+
+    return {
+        "available": True,
+        "as_of": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "inception": start,
+        "pnl_from_inception": round(pnl, 2) if pnl is not None else None,
+        "pnl_from_inception_pct": (round(pnl / start_value * 100, 2)
+                                   if pnl is not None and start_value else None),
+        "cash": round(paper.cash, 2),
+        "positions_value": round(invested, 2),
+        "total_value": round(paper.cash + invested, 2),
+        "cost_basis": round(cost_total, 2),
+        "unrealized": round(invested - cost_total, 2),
+        "realized_closed": realized.get("realized_usd"),
+        "round_trips": realized.get("round_trips"),
+        "open_positions": len(positions),
+        # The split that makes the headline number readable. Strategy P&L is
+        # the `acquired` line; `seeded` is the book's own drift, which the
+        # simulator neither caused nor can be judged on.
+        "seeded": {
+            "value": round(seeded_val, 2), "cost": round(seeded_cost, 2),
+            "unrealized": round(seeded_val - seeded_cost, 2),
+            "count": sum(1 for x in positions if x["origin"] == "seeded"),
+        },
+        "acquired": {
+            "value": round(acquired_val, 2), "cost": round(acquired_cost, 2),
+            "unrealized": round(acquired_val - acquired_cost, 2),
+            "count": sum(1 for x in positions if x["origin"] == "sim"),
+        },
+        "positions": positions[:40],
+        "unpriced": unpriced,
+        "sim_account": sim_account.summary(),
+        "note": ("unrealized is marked to the LIVE feed; realized counts only "
+                 "round trips opened and closed inside this record"),
+    }
+
+
+@router.get("/heartbeat")
+def heartbeat():
+    """Liveness per component — is anything silently dead?
+
+    Every other page renders happily on stale data, so an unattended job that
+    stops looks identical to one that is working. This is the only surface that
+    answers "did it actually run", cadence-relative and market-aware.
+    """
+    from ..agent.heartbeat import scan
+    return scan()
+
+
+@router.get("/blotter")
+def blotter(limit: int = 100):
+    """The durable fill record — what the simulated book actually did.
+
+    Distinct from `recent_orders` in /api/status, which is this process's
+    in-memory list and dies with the server. This survives restarts, which is
+    what makes a paper run evidence rather than a status light.
+    """
+    from ..engine import blotter as bl
+    return {"summary": bl.summary(), "rows": bl.rows()[-limit:][::-1]}
 
 
 @router.get("/decisions")

@@ -105,6 +105,8 @@
       <a href="#rules">Rules it enforces</a>
       <a href="#traps">Traps it watches for</a>
       <div class="navhead">Reference</div>
+      <a href="#tickers">Sector tickers</a>
+      <a href="#cycles">The cycle stack</a>
       <a href="#commands">Commands</a>
     </nav>
 
@@ -328,6 +330,97 @@
 
       <hr>
       <div class="kicker">Reference</div>
+      <h2 id="tickers">Sector tickers
+        <span class="lede">The dashboard prints these as bare symbols. Here is what they are.</span></h2>
+
+      <p>Sector and rotation panels show tickers like <code>XLE</code> with no expansion,
+      which forces you to hold the mapping in your head. It lives in
+      <code>app/analytics/sectors.py</code>; this is the same table.</p>
+
+      <table>
+        <thead><tr><th>Ticker</th><th>Sector</th><th>Note</th></tr></thead>
+        <tbody>
+          <tr><td><code>XLK</code></td><td>Technology</td><td></td></tr>
+          <tr><td><code>XLC</code></td><td>Communication Services</td><td></td></tr>
+          <tr><td><code>XLY</code></td><td>Consumer Discretionary</td><td>cyclical demand</td></tr>
+          <tr><td><code>XLI</code></td><td>Industrials</td><td></td></tr>
+          <tr><td><code>XLB</code></td><td>Materials</td><td></td></tr>
+          <tr><td><code>XLE</code></td><td>Energy</td><td></td></tr>
+          <tr><td><code>XLF</code></td><td>Financials</td><td></td></tr>
+          <tr><td><code>XLRE</code></td><td>Real Estate</td><td>rate-sensitive</td></tr>
+          <tr><td><code>XLV</code></td><td>Health Care</td><td><b>defensive</b></td></tr>
+          <tr><td><code>XLP</code></td><td>Consumer Staples</td><td><b>defensive</b></td></tr>
+          <tr><td><code>XLU</code></td><td>Utilities</td><td><b>defensive</b></td></tr>
+        </tbody>
+      </table>
+
+      <p>Sub-industry ETFs, used where a sector is too coarse:
+      <code>SMH</code> semiconductors · <code>IGV</code> software ·
+      <code>XBI</code> biotech · <code>ITA</code> aerospace &amp; defence ·
+      <code>KRE</code> regional banks. Benchmarks: <code>SPY</code> S&amp;P 500 ·
+      <code>QQQ</code> Nasdaq 100 · <code>IWM</code> Russell 2000 ·
+      <code>DIA</code> Dow · <code>^VIX</code> volatility index.</p>
+
+      <p><b>Reading rotation.</b> <code>python -m app.analytics.sectors</code> ranks
+      relative strength over 1m/3m/6m windows. The three marked <b>defensive</b> are
+      the tell: money moves into <code>XLP</code>, <code>XLU</code> and <code>XLV</code>
+      when the goal changes from making money to not losing it. Defensives leading
+      while <code>XLK</code> and <code>XLY</code> lag is risk coming off, regardless
+      of what the index level is doing. The reverse — cyclicals and semis leading —
+      is risk going on.</p>
+
+      <p class="warn">Rotation is a <b>description of the present</b>, not a forecast.
+      It says where money has already gone. Treating a leadership table as a buy list
+      is how you arrive last.</p>
+
+      <h2 id="cycles">The cycle stack
+        <span class="lede">Three clocks, deliberately weighted differently.</span></h2>
+
+      <p><code>python -m app.macro.signals</code> prints all three. They do
+      <b>not</b> carry equal authority, and the difference is sample size.</p>
+
+      <table>
+        <thead><tr><th>Cycle</th><th>Sample</th><th>Contributes bias?</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><b>Election / presidential</b><br><span class="muted">year 1–4</span></td>
+            <td>n=19 per bucket<br>1951–2026</td>
+            <td><b>Yes</b> — up to ±0.35</td>
+            <td>Pre-election (year 3) is the standout: mean +17.2%, 89% positive.
+                Enough history to be worth something.</td>
+          </tr>
+          <tr>
+            <td><b>M2 liquidity</b><br><span class="muted">level + acceleration</span></td>
+            <td>monthly FRED series,<br>2-month publication lag</td>
+            <td><b>Yes</b></td>
+            <td>Level is lagged 6 months for transmission; acceleration is used
+                contemporaneously. Point-in-time — a backtest cannot see a print
+                before it existed.</td>
+          </tr>
+          <tr>
+            <td><b>Bitcoin halving</b><br><span class="muted">quartile 1–4</span></td>
+            <td><b>n=3 completed cycles</b></td>
+            <td><b>No — zero by design</b></td>
+            <td>Two of the three sit inside the same monetary expansion, so
+                issuance cannot be separated from liquidity. Reports position
+                only.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p>The halving is <b>excluded from the blend, not averaged in as a zero</b>.
+      A 0.0 term is not neutral — it drags the average toward zero and quietly
+      weakens every real signal beside it. Adding it naively would have cut the
+      macro tilt by a third while looking like an addition.</p>
+
+      <p class="warn">Why the halving gets no vote: this project already deleted
+      <code>app/macro/timeline.py</code> for hard-coding <i>"ai_boom 2023–2027:
+      semiconductors +0.6"</i> — a narrative written after the race, whose edge
+      vanished out of sample. "Halving → bull market" is the same shape of claim
+      on an even smaller sample. <code>halving_history()</code> will show you the
+      measured quartile returns; read <code>n_independent_cycles</code>, which is
+      3, before believing the mean.</p>
+
       <h2 id="commands">Commands</h2>
 
       <table>
@@ -343,6 +436,8 @@
           <tr><td><code>python -m app.analytics.researcher</code></td><td>The outward brief</td></tr>
           <tr><td><code>python -m app.intel.themes</code></td><td>Which themes are alive or rotating</td></tr>
           <tr><td><code>python -m app.analytics.sectors</code></td><td>Where money moved market-wide</td></tr>
+          <tr><td><code>python -m app.macro.signals</code></td><td>The cycle stack — election, M2, halving position</td></tr>
+          <tr><td><code>python -m app.macro.doctrine</code></td><td>Structural theses graded against published series</td></tr>
           <tr><td><code>python -m app.analytics.cycle_sectors</code></td><td>What this cycle year usually brings</td></tr>
           <tr><td><code>python -m app.intel.exit_discipline</code></td><td>What selling has cost</td></tr>
           <tr><td><code>python -m app.backtest.trials</code></td><td>What survives its own search</td></tr>

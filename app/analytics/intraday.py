@@ -371,6 +371,92 @@ def _stop_on_bars(symbol: str, bars: list[MinuteBar], stop_pct: float,
         round(peak / entry - 1.0, 6), round(hold_pct, 6))
 
 
+# The flat thresholds exit_plans.py applies to every name, regardless of how
+# much that name actually moves. This audit exists to test that assumption.
+POLICY_MAX_LOSS_PCT = 15.0
+POLICY_TRAILING_HALT_PCT = 20.0
+AUDIT_HOLD_SESSIONS = 21          # matches exit_plans' time_stop_sessions
+
+
+def excursion_profile(symbol: str, hold_sessions: int = AUDIT_HOLD_SESSIONS) -> dict | None:
+    """How far this name routinely travels against you, over the policy horizon.
+
+    Reported as a DISTRIBUTION, not a mean. The question a flat stop implies is
+    "does 15% sit outside this name's normal noise?", and only the spread can
+    answer it.
+    """
+    feats = daily_features(symbol)
+    if len(feats) < hold_sessions + 2:
+        return None
+    worst = []
+    for i in range(len(feats) - hold_sessions):
+        entry = feats[i].open
+        if entry <= 0:
+            continue
+        low = min(f.low for f in feats[i:i + hold_sessions])
+        worst.append(low / entry - 1.0)
+    if not worst:
+        return None
+    worst.sort()
+    n = len(worst)
+    return {
+        "symbol": symbol.upper(), "entries": n, "hold_sessions": hold_sessions,
+        "sessions_stored": len(feats),
+        "median_mae_pct": round(worst[n // 2] * 100, 1),
+        "worst_mae_pct": round(worst[0] * 100, 1),
+        "breach_15_pct": round(sum(1 for w in worst if w <= -0.15) / n * 100),
+        "breach_20_pct": round(sum(1 for w in worst if w <= -0.20) / n * 100),
+    }
+
+
+def report() -> dict:
+    """Roster entrypoint for the exit auditor.
+
+    Owns ONE verdict: do the flat exit thresholds fit the names they are applied
+    to? It does not choose a threshold — exit_plans.py sets policy and this
+    grades it. Keeping that line is why nothing here writes a stop level.
+    """
+    from ..data.minute import coverage
+
+    profiles, verdicts = [], []
+    for sym in sorted(coverage()):
+        p = excursion_profile(sym)
+        if not p:
+            continue
+        # A stop is only meaningful between "never reached" and "always hit".
+        if p["breach_15_pct"] >= 60:
+            v = "TOO TIGHT — fires on ordinary noise for this name"
+        elif p["breach_15_pct"] <= 5:
+            v = "NEVER BINDS — decoration, not a stop"
+        else:
+            v = "PLAUSIBLE — fires sometimes, not always"
+        p["verdict_15"] = v
+        profiles.append(p)
+        verdicts.append(v.split(" —")[0])
+
+    spread = None
+    if len(profiles) > 1:
+        meds = [p["median_mae_pct"] for p in profiles]
+        spread = round(max(meds) - min(meds), 1)
+
+    return {
+        "agent": "exit_auditor", "kind": "checker",
+        "policy": {"max_loss_pct": POLICY_MAX_LOSS_PCT,
+                   "trailing_halt_pct": POLICY_TRAILING_HALT_PCT,
+                   "hold_sessions": AUDIT_HOLD_SESSIONS},
+        "profiles": profiles,
+        "median_mae_spread_pp": spread,
+        "verdict": (
+            "one flat threshold does not fit these names"
+            if spread is not None and spread >= 10 else
+            "flat threshold is defensible across the names measured"
+            if spread is not None else
+            "insufficient minute history to audit exits"),
+        "note": ("Measures only; exit_plans.py owns the policy. A spread this "
+                 "wide means the same percentage is a different rule per name."),
+    }
+
+
 def _main() -> None:
     ap = argparse.ArgumentParser(description="Intraday exit measurement (minute bars).")
     ap.add_argument("--features", metavar="SYMBOL")

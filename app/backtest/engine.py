@@ -52,6 +52,44 @@ class BacktestResult:
     harvest_events: int = 0                # count of sells that realized a loss
     costs_paid: float = 0.0                # $ given up to spread + slippage + commission
     equity_curve: list[float] = field(default_factory=list)
+    trade_returns: list[float] = field(default_factory=list)   # per closed trade
+
+    def expectancy(self) -> dict:
+        """Per-TRADE economics — the bar for a swing/day-trading stack.
+
+        Distinct from `win_rate`, which is the share of UP DAYS in the equity
+        curve. A buy-and-hold makes zero trades and still posts a ~54% win_rate
+        by that definition, so the two must never be read as the same thing.
+
+        Expectancy is what survives the difference: an 80% hit rate with losses
+        twelve times the size of wins loses money, and a 30% hit rate with wins
+        nine times the size of losses makes it.
+        """
+        import statistics as _st
+        r = self.trade_returns
+        if not r:
+            return {"trades_closed": 0,
+                    "note": "no closed trades — nothing to compute expectancy from"}
+        wins = [x for x in r if x > 0]
+        losses = [x for x in r if x < 0]
+        aw = _st.fmean(wins) if wins else 0.0
+        al = abs(_st.fmean(losses)) if losses else 0.0
+        wr = len(wins) / len(r)
+        streak = worst = 0
+        for x in r:
+            streak = streak + 1 if x <= 0 else 0
+            worst = max(worst, streak)
+        gw, gl = sum(wins), abs(sum(losses))
+        return {
+            "trades_closed": len(r),
+            "trade_win_rate_pct": round(wr * 100, 1),
+            "avg_win_pct": round(aw * 100, 2),
+            "avg_loss_pct": round(al * 100, 2),
+            "payoff_ratio": round(aw / al, 2) if al > 0 else None,
+            "expectancy_pct": round((wr * aw - (1 - wr) * al) * 100, 3),
+            "profit_factor": round(gw / gl, 2) if gl > 0 else None,
+            "worst_losing_streak": worst,
+        }
 
     def to_dict(self) -> dict:
         return {
@@ -61,7 +99,14 @@ class BacktestResult:
             "cagr_pct": round(self.cagr * 100, 2),
             "max_drawdown_pct": round(self.max_drawdown * 100, 2),
             "sharpe": round(self.sharpe, 2), "volatility_pct": round(self.volatility * 100, 2),
-            "win_rate_pct": round(self.win_rate * 100, 1), "trades": self.trades,
+            # Renamed at the boundary: this is the share of UP DAYS in the
+            # equity curve, not the share of winning trades. It sat next to
+            # `trades` under the name "win_rate_pct" and read as a trade hit
+            # rate, which it never was. Trade economics live in `expectancy`.
+            "up_days_pct": round(self.win_rate * 100, 1),
+            "win_rate_pct": round(self.win_rate * 100, 1),   # deprecated alias
+            "expectancy": self.expectancy(),
+            "trades": self.trades,
             "halted_days": self.halted_days, "run_id": self.run_id,
             "realized_pnl": round(self.realized_pnl, 2),
             "harvested_losses": round(self.harvested_losses, 2),
@@ -102,6 +147,7 @@ class Backtest:
         self._realized_pnl = 0.0
         self._costs_paid = 0.0
         self._harvested_losses = 0.0
+        self._trade_returns: list[float] = []      # per closed trade, for expectancy
         self._harvest_events = 0
         hwm = self.starting_cash
         equity_curve: list[float] = []
@@ -174,6 +220,7 @@ class Backtest:
             cagr=self._cagr(final_equity, n), max_drawdown=max_dd,
             sharpe=self._sharpe(rets), volatility=self._vol(rets),
             win_rate=(sum(1 for r in rets if r > 0) / len(rets)) if rets else 0.0,
+            trade_returns=list(self._trade_returns),
             trades=trades, halted_days=halted_days, run_id=self.run_id,
             realized_pnl=self._realized_pnl, harvested_losses=self._harvested_losses,
             harvest_events=self._harvest_events, costs_paid=self._costs_paid,
@@ -281,6 +328,14 @@ class Backtest:
                 avg_cost = cost_basis[s] / shares[s] if shares[s] > 1e-9 else px
                 realized = (px - avg_cost) * q
                 self._realized_pnl += realized
+                # Per-trade RETURN, captured where the P&L actually realizes.
+                # Needed because `win_rate` below is computed from daily equity
+                # returns — it reports the share of UP DAYS, not the share of
+                # winning trades, while sitting next to a `trades` count that
+                # invites exactly that misreading. Expectancy for a swing/day
+                # stack has to be per trade or it means nothing.
+                if avg_cost > 0:
+                    self._trade_returns.append((px - avg_cost) / avg_cost)
                 if realized < 0:
                     self._harvested_losses += -realized
                     self._harvest_events += 1

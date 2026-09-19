@@ -21,6 +21,7 @@ class MarketData:
         self.history_len = history_len
         self._history: dict[str, deque[float]] = defaultdict(lambda: deque(maxlen=history_len))
         self._last: dict[str, Quote] = {}
+        self._synthetic_symbols: set[str] = set()
 
     def set_primary(self, broker: BrokerBase) -> None:
         self.primary = broker
@@ -34,9 +35,26 @@ class MarketData:
                 q = None
         if q is None:
             q = self._synthetic(symbol)
+            # A synthetic quote is a RANDOM WALK, not a price. It exists so the
+            # engine keeps running when a feed is missing, and it must never be
+            # mistaken for market data: NEWYY, which had no cached price, was
+            # sold at 5.99 and marked at a fabricated 295.97, producing a
+            # -4841% figure that swamped every real result in the record.
+            # Callers that place orders check `is_real()` before acting.
+            self._synthetic_symbols.add(symbol.upper())
+        else:
+            self._synthetic_symbols.discard(symbol.upper())
         self._last[symbol] = q
         self._history[symbol].append(q.price)
         return q
+
+    def is_real(self, symbol: str) -> bool:
+        """False when the last quote for this symbol was fabricated."""
+        return symbol.upper() not in self._synthetic_symbols
+
+    @property
+    def synthetic_symbols(self) -> set[str]:
+        return set(self._synthetic_symbols)
 
     def refresh(self, symbols: list[str]) -> dict[str, Quote]:
         return {s: self.quote(s) for s in symbols}

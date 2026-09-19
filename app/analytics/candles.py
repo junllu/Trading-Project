@@ -85,6 +85,10 @@ class PatternScore:
     direction: int = 0
     occurrences_per_year: float = 0.0
     std_pct: float = 0.0               # dispersion of the per-occurrence excess
+    # Per-occurrence excess series, kept so deflation can MEASURE skew and
+    # kurtosis instead of assuming a normal distribution. Excluded from
+    # to_dict(): it is an input to the statistics, not a reportable field.
+    excesses: list[float] = field(default_factory=list, repr=False)
 
     @property
     def sharpe(self) -> float:
@@ -119,8 +123,8 @@ class PatternScore:
         return round(self.mean_move_pct - self.baseline_pct, 3)
 
     def to_dict(self) -> dict:
-        return dict(self.__dict__) | {"excess_pct": self.excess_pct,
-                                      "sharpe": self.sharpe}
+        d = {k: v for k, v in self.__dict__.items() if k != "excesses"}
+        return d | {"excess_pct": self.excess_pct, "sharpe": self.sharpe}
 
 
 def _atr(bars: list[Bar], i: int, window: int = ATR_WINDOW) -> float:
@@ -223,7 +227,8 @@ def measure(symbol: str, horizon: int = 5) -> list[PatternScore]:
             baseline_pct=round(base, 3), direction=d,
             std_pct=round(st.pstdev(scored), 3) if len(scored) > 1 else 0.0,
             hit_rate_pct=round(100 * hits / len(idxs), 1),
-            occurrences_per_year=round(len(idxs) / years, 1)))
+            occurrences_per_year=round(len(idxs) / years, 1),
+            excesses=[round(x - base, 4) for x in scored]))
     return sorted(out, key=lambda s: -s.excess_pct)
 
 
@@ -256,17 +261,74 @@ def deflate(symbols: list[str] | None = None) -> dict:
     # n_periods is the number of OCCURRENCES the best cell actually saw, not
     # the number of bars in the file. The Sharpe was estimated from those
     # occurrences and its standard error follows from them alone.
+    #
+    # MOMENTS ARE MEASURED, NOT ASSUMED. deflated_sharpe defaults to skew 0 and
+    # kurtosis 3 — a normal distribution — and this call used to accept them.
+    # Both terms sit in the denominator's variance: negative skew and fat tails
+    # each WIDEN the standard error and so LOWER the deflated ratio. Assuming
+    # normality on a return series that is neither is a thumb on the scale in
+    # the direction of "PASS", which is exactly the wrong direction. This module
+    # has already shipped one units bug into this slot (see PatternScore.sharpe).
+    from ..backtest.trials import _moments
+    skew, kurt = _moments(best.excesses) if len(best.excesses) > 2 else (0.0, 3.0)
     d = deflated_sharpe(observed_sr=best.sharpe, n_periods=max(best.n, 1),
-                        n_trials=len(rows), sharpe_variance=var)
+                        n_trials=len(rows), sharpe_variance=var,
+                        skew=skew, kurtosis=kurt)
+    # DIRECTIONAL AND NEUTRAL PATTERNS ARE DEFLATED SEPARATELY, because a single
+    # headline verdict over both is misleading in a specific, mechanical way.
+    #
+    # A neutral pattern is scored on |x| - baseline. For a roughly normal return
+    # series that transform is strongly RIGHT-SKEWED (|N(0,1)| has skew ~+0.99),
+    # and the grid's overall winner — a doji — carries skew +1.08.
+    #
+    # That skew is doing the work. Decomposed on this cell (SR 2.298, 3208
+    # trials): Gaussian assumption 0.9755 · measured KURTOSIS alone 0.9468 ·
+    # measured SKEW alone 0.9998 · both 0.986. The fat tails ALONE fail the 0.95
+    # bar; the transform-induced skew is what rescues it. So the "survivor" is an
+    # artifact of how neutral patterns are scored, not evidence of an edge.
+    #
+    # (The skew term helps here only because this Sharpe already exceeds the
+    # selection bar — below the bar the same variance shrink makes the verdict
+    # worse. The sign is not universal, which is another reason to report the
+    # two families separately rather than collapse them into one headline.)
+    #
+    # A neutral pattern also claims something different: "a big move is coming",
+    # not "price goes up". That is an OPTIONS-leg input (volatility), never a
+    # reason to buy stock — which is why leg independence matters here.
+    def _judge(subset: list[PatternScore]) -> dict:
+        if not subset:
+            return {"verdict": "NO CELLS"}
+        b = max(subset, key=lambda r: r.sharpe)
+        sk, ku = _moments(b.excesses) if len(b.excesses) > 2 else (0.0, 3.0)
+        dd = deflated_sharpe(observed_sr=b.sharpe, n_periods=max(b.n, 1),
+                             n_trials=len(rows), sharpe_variance=var,
+                             skew=sk, kurtosis=ku)
+        return {
+            "best": b.to_dict(), "deflation": dd,
+            "verdict": ("SURVIVES" if dd["deflated_sharpe_ratio"] >= 0.95
+                        and b.sharpe > dd["expected_max_sharpe_under_no_edge"]
+                        else "NOT DISTINGUISHABLE FROM SELECTION"),
+        }
+
+    directional = _judge([r for r in rows if r.direction != 0])
+    neutral = _judge([r for r in rows if r.direction == 0])
+
     return {
         "looks": len(rows),
         "positive_excess": sum(1 for r in rows if r.excess_pct > 0),
         "best": best.to_dict(),
         "top5": [r.to_dict() for r in ranked[:5]],
+        "moments_measured": len(best.excesses) > 2,
         "deflation": d,
-        "verdict": ("SURVIVES" if d["deflated_sharpe_ratio"] >= 0.95
-                    and best.sharpe > d["expected_max_sharpe_under_no_edge"]
-                    else "NOT DISTINGUISHABLE FROM SELECTION"),
+        "directional": directional,
+        "neutral": neutral,
+        # The headline answers the question anyone actually asks of a candle
+        # study: is there a tradeable DIRECTIONAL signal here?
+        "verdict": directional["verdict"],
+        "note": ("verdict reflects DIRECTIONAL patterns only. Neutral (|x|-scored) "
+                 "patterns are reported separately: their right-skew is a property "
+                 "of the transform, and their claim is 'a big move', which belongs "
+                 "to the options leg rather than to stock selection."),
     }
 
 

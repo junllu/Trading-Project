@@ -1,0 +1,10 @@
+Local LLM analyst (qwen2.5:7b-instruct @ http://localhost:11434): reachable
+Backtest: ['MRVL', 'NVDA', 'TSLA']  |  1173 bars  |  source=csv
+==================================================================================================
+setup                              return    CAGR   maxDD  Sharpe  trades   harvested  events
+--------------------------------------------------------------------------------------------------
+E: Trend+Forecast+Macro, halt ON   504.8%   47.2%   40.5%    1.16     150      28338$      43
+G: Trend+Forecast+LocalLLM, weekly rebalance   295.1%   34.3%   39.3%    0.97     206      54960$      54
+==================================================================================================
+Best by CAGR: E: Trend+Forecast+Macro, halt ON  (47.2%/yr, maxDD 40.48%, Sharpe 1.16)
+Note: synthetic data shows mechanics only. On REAL data this ranking is decision-grade.

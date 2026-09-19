@@ -156,6 +156,10 @@ class DailyAgent:
         actions: list[dict] = []
         if self.execute and not halted:
             for conv in convictions:
+                # No real price, no order. A missing feed falls back to a random
+                # walk, and trading that grades the strategy on dice.
+                if not p.market.is_real(conv.symbol):
+                    continue
                 sig = conviction_to_signal(
                     conv.symbol, conv.score, p.market.history(conv.symbol),
                     strategy="daily_agent",
@@ -166,8 +170,17 @@ class DailyAgent:
                     continue
                 # Concentration: only OPEN new longs in the focus names; sells
                 # (trims to fund the focus / cut losers) are allowed anywhere.
+                #
+                # PAPER is the exception, deliberately. With focus = MRVL/NVDA/
+                # TSLA and all three scoring "hold", this filter meant the
+                # simulator could emit nothing but exits — a training loop that
+                # never opens a position learns half the job, and no amount of
+                # running it would produce entry evidence. In paper the screened
+                # watchlist is allowed so both sides of the decision get graded.
+                # Live and confirm keep campaign concentration untouched.
                 if sig.side is Side.BUY and focus and conv.symbol not in focus:
-                    continue
+                    if p.settings.mode.value != "paper":
+                        continue
                 if sig.side is Side.BUY:
                     from ..analytics.trade_filters import filter_buy
                     # Live/confirm: sleeve must clear. Paper: still apply theme gate only.
@@ -246,6 +259,17 @@ class DailyAgent:
                     notes.append("focus name")
                 if sig.side is Side.SELL and held is None:
                     notes.append("no shares held — SKIP (verify live account)")
+                elif sig.side is Side.SELL and px > 0:
+                    # Dollar sizing does not know the position, so an exit
+                    # signal routinely asks for more shares than are held and
+                    # the whole order is bounced. The plan is what a human
+                    # approves for REAL execution, so it must never propose
+                    # selling more than the book owns.
+                    held_val = held.quantity * px
+                    if sig.order_value > held_val:
+                        notes.append(f"sell sized ${sig.order_value:,.2f} > "
+                                     f"${held_val:,.2f} held — clamped to position")
+                        sig.order_value = round(held_val, 2)
                 if sig.side is Side.BUY:
                     held_val = (held.quantity * px) if held else 0.0
                     if held_val + sig.order_value > limits.max_position_value:
@@ -272,7 +296,14 @@ class DailyAgent:
                         book_dd /= 100.0
                 sleeve_edge = None
                 try:
-                    import json
+                    # NO local `import json` here. It shadowed the module-level
+                    # import and made `json` a local for the WHOLE function, so
+                    # on any run where this loop body was not reached — i.e.
+                    # whenever the plan had zero orders, the most common case —
+                    # json.dumps(plan) at the end raised UnboundLocalError. That
+                    # crashed every live-recorder cycle and is why the forward
+                    # record sat at 6 rows while everything downstream waited
+                    # on it.
                     from ..analytics.sleeve import STATUS_PATH
                     if STATUS_PATH.exists():
                         sleeve_edge = json.loads(

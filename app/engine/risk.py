@@ -42,6 +42,16 @@ class RiskManager:
         self.limits = limits
         self.allowed_symbols = set(allowed_symbols or [])
         self._orders_today = 0
+        # Entry budget SPENT PER SLEEVE.
+        #
+        # One shared counter meant the sleeve that happened to iterate first
+        # consumed the day: in one session 20 of 21 rejections were "daily order
+        # limit reached", daily_agent took 23 fills, and sma_crossover got 1
+        # from 8 attempts. That is not an outcome, it is an ordering artifact —
+        # and n=1 can neither convict nor acquit a strategy. Separate budgets
+        # mean each sleeve accumulates a sample that can actually be measured,
+        # and none can starve another.
+        self._orders_by_sleeve: dict[str, int] = {}
         self._realized_loss = 0.0
         self._day = self._today()
         # (date, symbol) -> ORDERED sides filled that session. A set will not do
@@ -62,6 +72,7 @@ class RiskManager:
         if today != self._day:
             self._day = today
             self._orders_today = 0
+            self._orders_by_sleeve.clear()
             self._realized_loss = 0.0
             # Fill history OUTLIVES the day — the PDT window is five business
             # days, so clearing it here would reset the count every morning and
@@ -76,9 +87,27 @@ class RiskManager:
         if amount < 0:
             self._realized_loss += -amount
 
-    def record_order(self, symbol: str | None = None, side: str | None = None) -> None:
+    def sleeve_budget(self, sleeve: str) -> int:
+        """Entry orders this sleeve may place today.
+
+        From `risk.sleeve_budgets` in config when present, otherwise an even
+        split of the daily cap across the known sleeves. An unlisted sleeve
+        still gets a share rather than zero — silently giving a new strategy no
+        budget would look exactly like the strategy never signalling.
+        """
+        configured = getattr(self.limits, "sleeve_budgets", None) or {}
+        if sleeve in configured:
+            return int(configured[sleeve])
+        known = max(1, len(configured) or len(self._orders_by_sleeve) or 1)
+        return max(1, self.limits.max_orders_per_day // max(known, 2))
+
+    def record_order(self, symbol: str | None = None, side: str | None = None,
+                     sleeve: str | None = None) -> None:
         self._roll_day()
         self._orders_today += 1
+        if (side or "").lower() == "buy":
+            key = (sleeve or "unknown").lower()
+            self._orders_by_sleeve[key] = self._orders_by_sleeve.get(key, 0) + 1
         if symbol and side:
             self._fills.setdefault((self._day, symbol.upper()), []).append(side.lower())
 
@@ -183,7 +212,21 @@ class RiskManager:
         self._roll_day()
         L = self.limits
 
-        if self.allowed_symbols and L.allowed_symbols_only and order.symbol not in self.allowed_symbols:
+        # The allowlist governs what may be BOUGHT. Applied to sells it stops
+        # you exiting something you already hold — the book contains 30 names
+        # and the watchlist 12, so every position outside the watchlist became
+        # unsellable. BE, flagged EXIT on a DEAD theme, was refused on exactly
+        # this line for two days running.
+        #
+        # Third instance of one pattern today: the order-value cap, the daily
+        # order budget and now the allowlist were all written to limit NEW risk
+        # and all applied to risk-REDUCING orders, where they trap exposure
+        # instead of limiting it. A control on buying is not a control on
+        # selling, and treating them as one is how a guardrail becomes the
+        # hazard.
+        if (order.side is Side.BUY and self.allowed_symbols
+                and L.allowed_symbols_only
+                and order.symbol not in self.allowed_symbols):
             return RiskDecision(False, f"{order.symbol} not in allowed symbols")
 
         if order.quantity <= 0:
@@ -193,13 +236,36 @@ class RiskManager:
         # mean the same thing on the $184 agentic account, a $27k sleeve, or the
         # full book. ref_price stands in for symbols we hold but have no live
         # quote for; that only ever makes the cap tighter, never looser.
-        equity = account.equity({p.symbol: ref_price for p in account.positions})
+        # Only the symbol being traded gets the live price. Everything else is
+        # valued at its own cost basis, which is what Account.equity() falls
+        # back to for anything absent from this dict.
+        #
+        # The previous form mapped EVERY held symbol to this order's ref_price,
+        # so the whole book was repriced at whatever the current name happened
+        # to trade at. One tick produced equity of $181k, $322k and $240k for
+        # three different orders against a real book of $136k, and every
+        # percentage cap was computed off that. It also did the opposite of
+        # what its comment claimed: a high-priced symbol inflated equity and
+        # made the caps LOOSER, and is_test_sleeve() keyed off the same number.
+        equity = account.equity({order.symbol: ref_price})
         order_cap = L.order_cap(equity)
         position_cap = L.position_cap(equity)
         loss_cap = L.daily_loss_cap(equity)
 
         notional = order.notional(ref_price)
-        if notional > order_cap:
+        # The per-order cap governs NEW risk, so it applies to buys only.
+        #
+        # Applying it to sells inverts the guardrail: a $19,000 position could
+        # not be exited under a $2,000 cap, so the cap that exists to protect
+        # capital was the thing preventing capital from being protected. That is
+        # not hypothetical — the exit monitor's DEAD-theme EXIT on a $18,965
+        # position was refused by this line, and in a fast drawdown a cap that
+        # blocks the exit is the failure that ends a campaign.
+        #
+        # Everything that limits LOSS still applies to sells: the daily realized
+        # loss halt, the day-trade guard, the order-count breaker and the
+        # kill-switch are all below and none of them are skipped here.
+        if order.side is Side.BUY and notional > order_cap:
             return RiskDecision(False, f"order ${notional:.0f} exceeds order cap ${order_cap:.0f} "
                                        f"({L.max_order_pct:.0%} of ${equity:,.0f} equity)")
 
@@ -207,8 +273,20 @@ class RiskManager:
         if pdt:
             return RiskDecision(False, pdt)
 
-        if self._orders_today >= L.max_orders_per_day:
-            return RiskDecision(False, f"daily order limit reached ({L.max_orders_per_day})")
+        # The daily order budget governs NEW risk, so only buys spend it — the
+        # same reasoning as the order-value cap above. A sell that cannot be
+        # placed because entries used the last slot is a risk failure: the
+        # budget existed to limit exposure and would instead be trapping it.
+        if order.side is Side.BUY:
+            sleeve = (getattr(order, "strategy", None) or "unknown").lower()
+            spent = self._orders_by_sleeve.get(sleeve, 0)
+            cap = self.sleeve_budget(sleeve)
+            if spent >= cap:
+                return RiskDecision(
+                    False, f"{sleeve} used its daily entry budget ({spent}/{cap})")
+            if self._orders_today >= L.max_orders_per_day:
+                return RiskDecision(False,
+                                    f"daily order limit reached ({L.max_orders_per_day})")
 
         if self._realized_loss >= loss_cap:
             return RiskDecision(False, f"daily loss halt: ${self._realized_loss:.0f} >= ${loss_cap:.0f}")
@@ -233,6 +311,10 @@ class RiskManager:
         self._roll_day()
         out = {
             "orders_today": self._orders_today,
+            "entries_by_sleeve": dict(self._orders_by_sleeve),
+            "sleeve_budgets": {s: self.sleeve_budget(s)
+                               for s in set(self._orders_by_sleeve)
+                               | set(getattr(self.limits, "sleeve_budgets", None) or {})},
             "realized_loss": round(self._realized_loss, 2),
             "max_orders_per_day": self.limits.max_orders_per_day,
             "max_daily_loss": self.limits.max_daily_loss,

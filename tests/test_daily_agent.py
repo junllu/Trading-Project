@@ -29,6 +29,13 @@ def build_portal():
     p.market.seed_history("BBB", [160 - i for i in range(60)])
     p.brokers["paper"].set_price("AAA", 159.0)
     p.brokers["paper"].set_price("BBB", 101.0)
+    # This fixture's prices ARE the scenario, so the market must read them.
+    # Production deliberately does not do this: pointing the market at the paper
+    # broker made the simulator quote itself from a stale holdings.yaml seed, and
+    # prices that never move net every round trip to exactly zero. Here the
+    # prices are set on purpose and the test is about order routing, not
+    # provenance — so the source is declared rather than inherited.
+    p.market.set_primary(paper)
     return p
 
 

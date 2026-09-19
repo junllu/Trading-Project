@@ -72,6 +72,21 @@ def run_sweep(universe_name: str, setup_keys: list[str], start: str = "2022-01-0
             best = results[0]
             print(f"[{gi + 1}/{len(groups)}] {group}  best={best['setup']}  "
                   f"CAGR={best['cagr_pct']}%  Sharpe={best['sharpe']}  maxDD={best['max_drawdown_pct']}%")
+            # Trade economics, printed next to CAGR because they answer a
+            # different question: CAGR says what the equity curve did, and
+            # expectancy says whether the DECISIONS earned it. A high CAGR on
+            # two trades in a rising tape is the tape.
+            e = best.get("expectancy") or {}
+            if e.get("trades_closed"):
+                print(f"         trades={e['trades_closed']}  "
+                      f"exp={e['expectancy_pct']:+.3f}%/trade  "
+                      f"win={e['trade_win_rate_pct']}%  "
+                      f"payoff={e['payoff_ratio']}  "
+                      f"PF={e['profit_factor']}  "
+                      f"worst streak={e['worst_losing_streak']}")
+            else:
+                print("         no closed trades — CAGR here is buy-and-hold drift, "
+                      "not decisions")
             done += 1
             if pause_seconds > 0:
                 time.sleep(pause_seconds)

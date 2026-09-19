@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "webull": {
+      "command": "C:\\Users\\winter\\Documents\\GitHub\\Trading-Project\\.venv\\Scripts\\webull-openapi-mcp.exe",
+      "args": [
+        "serve",
+        "--env-file",
+        "C:\\Users\\winter\\Documents\\GitHub\\Trading-Project\\.env"
+      ]
+    }
+  }
+}

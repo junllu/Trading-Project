@@ -363,6 +363,52 @@
       </div>
     </section>
 
+    <!-- ===================== DECISION QUEUE =====================
+         The chief's output. It existed for weeks and was never displayed —
+         the orchestrator skipped the coordinator and no panel fetched it, so
+         the one artefact that assembles every checker's finding was produced
+         only when someone typed the module name.
+         PARK vs FINISH is the load-bearing column: PARK means an irreversible
+         step is waiting on a human, and nothing on this board can execute. -->
+    <section class="card col-12" id="decisionsCard" style="border-color:#5a3a2b;">
+      <h2>🧭 Decision Queue — the chief
+        <span class="pill" id="decCounts" style="margin-left:8px;">—</span>
+        <span class="pill" id="decStaged" style="margin-left:4px;">—</span>
+      </h2>
+      <div class="muted" style="font-size:12px;margin-bottom:8px;">
+        Every row traces to a checker and carries a falsifier. Thomas executes only
+        rows you approve — nothing here reaches a broker on its own.
+      </div>
+      <table><thead><tr>
+        <th>Urgency</th><th>Subject</th><th>Claim</th>
+        <th>Owner</th><th>Gate</th>
+      </tr></thead><tbody id="decisions"></tbody></table>
+      <div class="muted" id="decNote" style="margin-top:8px;font-size:11px;"></div>
+    </section>
+
+    <!-- ===================== DOCTRINE TRACKER =====================
+         Structural theses graded on MECHANISM, never on price. Price tests
+         timing; a multi-year thesis graded on six months of tape says nothing.
+         PENDING is rendered distinctly from AGAINST on purpose: a quarterly
+         series that has not printed yet is not evidence of anything, and
+         collapsing the two would let publication lag read as refutation. -->
+    <section class="card col-12" id="doctrineCard" style="border-color:#3a3a5a;">
+      <h2>🌍 Doctrine Tracker — theses vs. what the world actually published
+        <span class="pill" id="docCount" style="margin-left:8px;">—</span>
+      </h2>
+      <div class="muted" style="font-size:12px;margin-bottom:8px;">
+        Each thesis names the series that would move if it were true, in which
+        direction, from a fixed baseline. No price inputs.
+      </div>
+      <!-- Issuance clock. Ordered left-to-right in TIME, so the eye reads it as
+           a timeline rather than a table of dates — the mapping is the point.
+           Passed milestones are dimmed; the campaign deadline is marked because
+           the only decision-relevant fact here is which side of it the next
+           peak falls on. -->
+      <div id="cycleClock" style="margin-bottom:14px;"></div>
+      <div id="doctrines" class="muted">loading…</div>
+    </section>
+
     <!-- ===================== INTRADAY TRUTH =====================
          What the daily bar hides. MAE/MFE are measured from the session open,
          so a day that closed flat but travelled -3% intraday stops looking
@@ -848,6 +894,129 @@
     setInterval(refreshIntel, 30000);
     setInterval(refreshIntraday, 60000);
     refreshIntraday();
+
+    const URG_COLOR = {now:'#f85149', this_week:'#d29922',
+                       this_quarter:'#58a6ff', watch:'#8b949e'};
+    async function refreshDecisions(){
+      try{
+        const q = await (await fetch('/api/decisions')).json();
+        const rows = q.decisions || [];
+        document.getElementById('decisions').innerHTML = rows.map(d => `
+          <tr title="${(d.falsifier||'').replace(/"/g,'&quot;')}">
+            <td style="color:${URG_COLOR[d.urgency]||'#8b949e'}">${d.urgency}</td>
+            <td><b>${d.subject}</b></td>
+            <td>${d.claim}</td>
+            <td class="muted">${d.owner}</td>
+            <td style="color:${d.gate==='PARK'?'#d29922':'#3fb950'}">${d.gate}</td>
+          </tr>`).join('') ||
+          '<tr><td colspan="5" class="muted">queue empty — nothing to decide</td></tr>';
+
+        const c = q.counts || {};
+        document.getElementById('decCounts').textContent =
+          `${rows.length} item(s) · ${c.now||0} now · ${c.this_week||0} this week`;
+        const staged = (q.staged_awaiting_approval||[]).length;
+        const sEl = document.getElementById('decStaged');
+        sEl.textContent = staged ? `${staged} staged — awaiting approval` : 'nothing staged';
+        sEl.style.color = staged ? '#d29922' : '#8b949e';
+        // Schema errors mean a record failed the chief's own validation. That
+        // must be visible: a malformed decision silently dropped is worse than
+        // a noisy queue.
+        const bad = (q.schema_errors||[]).length + (q.collectors_failed||[]).length;
+        document.getElementById('decNote').textContent = bad
+          ? `${bad} problem(s): ${[...(q.schema_errors||[]), ...(q.collectors_failed||[])].join(' · ')}`
+          : 'hover a row for its falsifier — what would prove the claim wrong.';
+      }catch(e){ /* keep the last good render */ }
+    }
+    setInterval(refreshDecisions, 120000);
+    refreshDecisions();
+
+    function renderCycleClock(c){
+      const el = document.getElementById('cycleClock');
+      if (!el) return;
+      if (!c || c.error){ el.innerHTML = ''; return; }
+      const cur = c.current_cycle || {}, nx = c.next_cycle || {}, vs = c.vs_campaign || {};
+      const past = v => `<span style="color:#6e7681">${v}</span>`;
+
+      // Milestones in time order. Passed ones are dimmed so the eye lands on
+      // what is still ahead without having to compare dates.
+      const stops = [
+        {label:'halving', val:cur.halving, done:true},
+        {label:'cycle peak', val:(cur.peak_window||[]).join(' → '), done:cur.peak_already_passed},
+        {label:'trough window', val:(cur.trough_window||[]).join(' → '),
+         done:false, hot:cur.in_trough_window},
+        {label:'next halving', val:nx.halving_est + (nx.halving_is_projected?' (est)':''), done:false},
+        {label:'next peak', val:nx.projected_peak, done:false, proj:true},
+      ];
+      const cells = stops.filter(s => s.val).map(s => `
+        <div style="flex:1;min-width:130px;padding:6px 8px;border-left:2px solid ${
+            s.hot ? '#d29922' : (s.done ? '#30363d' : '#3a3a5a')};">
+          <div class="muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;">
+            ${s.label}${s.proj?' (projected)':''}</div>
+          <div style="font-size:12px;${s.done?'color:#6e7681;':''}${
+            s.hot?'color:#d29922;font-weight:600;':''}">${s.val}</div>
+        </div>`).join('');
+
+      const off = c.peak_offset_days || {};
+      const after = (vs.next_peak_after_deadline_days ?? 0) > 0;
+      el.innerHTML = `
+        <div style="display:flex;flex-wrap:wrap;gap:4px;background:var(--panel2);
+                    border:1px solid var(--line);border-radius:6px;padding:6px;">${cells}</div>
+        <div style="margin-top:6px;font-size:12px;color:${after?'#f85149':'#3fb950'};">
+          Next issuance peak lands <b>${Math.abs(vs.next_peak_after_deadline_days)}d
+          ${after?'AFTER':'before'}</b> the ${vs.deadline} campaign deadline —
+          ${after?'this clock offers the campaign nothing.':'inside the campaign window.'}
+        </div>
+        <div class="muted" style="font-size:11px;margin-top:4px;">
+          Peak offset ${off.min}–${off.max}d (mean ${off.mean}, n=${off.n}).
+          ${c.caveat||''}
+        </div>`;
+    }
+
+    const DOC_MARK = {CONFIRMED:['CONFIRM','#3fb950'], CONTRADICTED:['AGAINST','#f85149'],
+                      NEUTRAL:['flat','#8b949e'], PENDING:['pending','#6e7681']};
+    async function refreshDoctrine(){
+      try{
+        const d = await (await fetch('/api/doctrine')).json();
+        const out = (d.doctrines||[]).map(t => {
+          const rows = (t.indicators||[]).map(r => {
+            const [label,color] = DOC_MARK[r.status] || ['?','#8b949e'];
+            const pend = r.status === 'PENDING';
+            return `<tr>
+              <td>${r.label}</td>
+              <td class="num muted">${pend?'—':r.baseline_value}</td>
+              <td class="num">${pend?'—':r.latest_value}</td>
+              <td class="num" style="color:${pend?'#6e7681':(r.change_pct>=0?'#3fb950':'#f85149')}">
+                ${pend?'—':(r.change_pct>0?'+':'')+r.change_pct+'%'}</td>
+              <td style="color:${color}">${label}${r.overdue?' <span class="muted">stale</span>':''}</td>
+              <td class="muted" style="font-size:11px;">${r.tests||r.why||''}</td>
+            </tr>`;
+          }).join('');
+          const v = t.verdict||'';
+          const vcolor = v.startsWith('TRACKING') ? '#f85149'
+                       : v.startsWith('NOT TRACKING') ? '#3fb950'
+                       : '#d29922';
+          return `<div style="margin-bottom:18px;">
+            <div style="font-weight:600;">${t.headline}</div>
+            <div class="muted" style="font-size:11px;margin:2px 0 6px;">
+              ${t.source} · baseline ${t.baseline} → horizon ${t.horizon}</div>
+            <div style="color:${vcolor};font-size:12px;margin-bottom:6px;">${v}</div>
+            <table><thead><tr>
+              <th>Indicator</th><th class="num">Baseline</th><th class="num">Latest</th>
+              <th class="num">Change</th><th>Verdict</th><th>Tests</th>
+            </tr></thead><tbody>${rows}</tbody></table>
+            <div class="muted" style="font-size:11px;margin-top:6px;">
+              <b>Falsifier:</b> ${t.falsifier}</div>
+          </div>`;
+        }).join('');
+        document.getElementById('doctrines').innerHTML = out ||
+          '<span class="muted">no doctrines defined</span>';
+        document.getElementById('docCount').textContent =
+          (d.doctrines||[]).map(t => t.verdict.split(' —')[0]).join(' · ');
+        renderCycleClock(d.cycle_clock);
+      }catch(e){ /* keep the last good render */ }
+    }
+    setInterval(refreshDoctrine, 15*60*1000);
+    refreshDoctrine();
     // Flight status. Colour carries severity, but the LABEL carries it too —
     // a board that only speaks in colour is unreadable to a colourblind user
     // and unreadable in a screenshot.

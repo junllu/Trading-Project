@@ -78,7 +78,10 @@ class LocalLLMAnalyst(ClaudeAnalyst):
                 ],
                 "format": "json",
                 "stream": False,
-                "options": {"temperature": 0.2},
+                # Temperature 0 for the same reason as intel/analyst.py: this
+                # rating feeds conviction, conviction sets size, and a sampled
+                # rating makes the resulting order value unreproducible.
+                "options": {"temperature": 0.0},
             },
             timeout=self.timeout,
         )

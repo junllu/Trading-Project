@@ -13,12 +13,14 @@ risk manager — not even live mode.
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass, field
 from typing import Optional
 
 from ..config import TradingMode
 from ..brokers.base import BrokerBase, BrokerError
 from ..models import Order, OrderStatus, OrderType, Side, Signal
+from . import blotter
 from .risk import RiskManager
 
 log = logging.getLogger("portal.executor")
@@ -63,7 +65,51 @@ class Executor:
         if qty <= 0:
             return None
         return Order(symbol=sig.symbol, side=sig.side, quantity=qty,
-                     order_type=OrderType.MARKET, reason=f"{sig.strategy}: {sig.note}")
+                     order_type=OrderType.MARKET, strategy=sig.strategy,
+                     reason=f"{sig.strategy}: {sig.note}")
+
+    @staticmethod
+    def _clamp_sell_to_position(order: Order, account) -> Optional[str]:
+        """Size a SELL to what is actually held. Returns a rejection reason, or
+        None if the order may proceed (possibly with a reduced quantity).
+
+        Sizing is done in DOLLARS — `order_value / price` — and dollars know
+        nothing about the position. So a $90 exit signal on a $2.30 stock asks
+        for 39.1 shares of a 38-share holding, and the broker bounces the whole
+        order. The position does not get exited, and the run records a rejection
+        instead of a fill. Two of every three orders in the last paper run died
+        this way, which starves the training record of the very evidence it
+        exists to collect while telling you nothing about strategy quality.
+
+        Clamping rather than rejecting is right because the intent of a sell
+        here is "reduce or exit this position", and selling what you own honors
+        that intent exactly. Nothing in this system shorts, so a sell larger
+        than the holding is always an arithmetic artifact, never a view.
+
+        Holding NOTHING is different in kind and is rejected: it means a signal
+        fired on a name the book does not own. That is worth recording as
+        evidence rather than silently discarding.
+        """
+        if order.side is not Side.SELL:
+            return None
+        held = 0.0
+        for p in getattr(account, "positions", None) or []:
+            if p.symbol == order.symbol:
+                held = float(p.quantity)
+                break
+        if held <= 0:
+            return f"no position in {order.symbol} to sell"
+        if order.quantity <= held:
+            return None
+        # Floor rather than round: rounding a clamp UP past the holding would
+        # reintroduce the same rejection it exists to prevent.
+        clamped = math.floor(held * 10_000) / 10_000
+        note = (f"sell sized {order.quantity:g} > {held:g} held — "
+                f"clamped to position")
+        order.quantity = clamped
+        order.reason = f"{order.reason}; {note}" if order.reason else note
+        log.info("%s: %s", order.symbol, note)
+        return None
 
     def _broker_for(self, order: Order) -> BrokerBase:
         if self.mode is TradingMode.PAPER:
@@ -101,11 +147,23 @@ class Executor:
             order.reason = f"account fetch failed: {exc}"
             return ExecutionResult(order, False, order.reason)
 
+        clamp = self._clamp_sell_to_position(order, account)
+        if clamp is not None:
+            order.status = OrderStatus.REJECTED
+            order.reason = clamp
+            self.history.append(order)
+            blotter.record(order, self.mode.value, ref_price)
+            return ExecutionResult(order, False, order.reason)
+
         decision = self.risk.approve(order, account, ref_price)
         if not decision.approved:
             order.status = OrderStatus.REJECTED
             order.reason = f"risk: {decision.reason}"
             self.history.append(order)
+            # Recorded too: what the strategy WANTED and the guardrail stopped
+            # is evidence. Keeping only the orders that got through is how a
+            # simulation acquires an imaginary hit rate.
+            blotter.record(order, self.mode.value, ref_price)
             return ExecutionResult(order, False, order.reason)
 
         if self.mode is TradingMode.CONFIRM:
@@ -129,12 +187,30 @@ class Executor:
         result = broker.place_order(order)
         self.history.append(result)
         accepted = result.status in (OrderStatus.FILLED, OrderStatus.SUBMITTED)
+
+        # The entry plan is written BEFORE the blotter row, because the row
+        # copies the plan into its thesis. Recording the fill first left every
+        # buy with an empty thesis — the plan existed a millisecond too late.
+        if accepted and result.side is Side.BUY and result.filled_price:
+            try:
+                from ..agent import position_plans
+                position_plans.record(
+                    result.symbol, float(result.filled_price),
+                    float(result.quantity),
+                    strategy=getattr(result, "strategy", "unknown"))
+            except Exception:
+                log.exception("could not record the entry plan for %s", result.symbol)
+
+        # Durable record. self.history dies with the process, so without this
+        # a week of paper runs leaves no evidence anything ever traded.
+        blotter.record(result, self.mode.value)
         # Symbol and side are what make this countable as a day trade; without
         # them the risk manager can only count orders, and orders are not day
         # trades. Recorded only when the broker took it — a rejected order
         # spends no PDT slot.
         if accepted:
-            self.risk.record_order(result.symbol, result.side.value)
+            self.risk.record_order(result.symbol, result.side.value,
+                                   sleeve=getattr(result, "strategy", None))
         else:
             self.risk.record_order()
         return ExecutionResult(result, accepted, result.reason or result.status.value)
@@ -156,4 +232,6 @@ class Executor:
             return False
         self.pending.remove(order)
         order.status = OrderStatus.CANCELLED
+        order.reason = "declined at approval"
+        blotter.record(order, self.mode.value)
         return True

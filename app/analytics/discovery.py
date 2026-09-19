@@ -138,13 +138,35 @@ def _universe(include_held: bool = False) -> list[str]:
 
 
 def _peer_standings() -> dict[str, dict]:
+    """Peer verdicts, including "no meaningful multiple" as a verdict.
+
+    Loss-makers were previously absent from this map, so every name with
+    negative trailing earnings looked like missing data and queued an MCP pull
+    forever — INTC, MRNA and TEAM each had complete fundamentals on disk and
+    were re-requested every run. No pull can fix a negative P/E.
+
+    Being set aside as loss-making IS the answer to "where does this trade
+    against its peers": nowhere, because the ratio is undefined. Recording that
+    stops the queue asking for data it already has, while keeping the band
+    honest rather than inventing a rank.
+    """
     try:
         from .peer_value import build
-        return {s.symbol: {"band": s.band, "vs_median_x": s.vs_median_x,
-                           "rank": f"{s.rank}/{s.of}"}
-                for g in build() for s in g.standings}
+        groups = build()
     except Exception:
         return {}
+
+    out: dict[str, dict] = {}
+    for g in groups:
+        for s in g.standings:
+            out[s.symbol] = {"band": s.band, "vs_median_x": s.vs_median_x,
+                             "rank": f"{s.rank}/{s.of}"}
+        for sym in getattr(g, "loss_making", []):
+            out.setdefault(sym, {"band": "NO EARNINGS", "vs_median_x": None,
+                                 "rank": "unranked",
+                                 "note": "negative trailing earnings — a P/E "
+                                         "multiple is undefined, not missing"})
+    return out
 
 
 def _fundamental_symbols() -> set[str]:
@@ -222,7 +244,10 @@ def scan(pool: str | None = None, include_held: bool = False) -> list[Candidate]
             cand.reasons.append(f"lagging {BENCHMARK} by {abs(rel):.0f}pp over 6m")
         if sym in peers:
             ps = peers[sym]
-            cand.peer_rank = f"{ps['rank']} {ps['band']} ({ps['vs_median_x']:.2f}x median)"
+            vs = ps.get("vs_median_x")
+            cand.peer_rank = (f"{ps['rank']} {ps['band']} ({vs:.2f}x median)"
+                              if isinstance(vs, (int, float))
+                              else f"{ps['rank']} {ps['band']}")
         else:
             cand.mcp_pulls.append(f"get_equity_fundamentals(['{sym}']) — no peer multiple, "
                                   f"so the PRIMARY screen cannot run")

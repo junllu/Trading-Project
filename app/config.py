@@ -53,6 +53,11 @@ class RiskLimits:
     max_orders_per_day: int = 20
     max_daily_loss: float = 1000
     allowed_symbols_only: bool = True
+    # Entry orders per sleeve per day. Sleeves share one executor and one book,
+    # so without separate budgets whichever iterates first spends the day and
+    # the others look like they had no signals. Sells are exempt entirely —
+    # a blocked exit is a risk failure, not a throttle.
+    sleeve_budgets: dict = field(default_factory=dict)
 
     # Fractions of account equity. 0 disables the percentage test.
     max_position_pct: float = 0.10     # no single name above 10% of the book
@@ -142,6 +147,7 @@ class Settings:
             max_position_value=r.get("max_position_value", base.max_position_value),
             max_order_value=r.get("max_order_value", base.max_order_value),
             max_orders_per_day=r.get("max_orders_per_day", base.max_orders_per_day),
+            sleeve_budgets=r.get("sleeve_budgets", base.sleeve_budgets),
             max_daily_loss=r.get("max_daily_loss", base.max_daily_loss),
             allowed_symbols_only=r.get("allowed_symbols_only", base.allowed_symbols_only),
             max_position_pct=r.get("max_position_pct", base.max_position_pct),

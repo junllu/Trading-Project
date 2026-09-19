@@ -10,3 +10,4 @@ python-dotenv>=1.0
 cryptography>=42.0
 requests>=2.31
 anthropic>=0.40
+tradingview-screener>=2.5

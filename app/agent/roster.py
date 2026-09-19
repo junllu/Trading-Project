@@ -48,9 +48,9 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass, field
 
-from .autonomy import IRREVERSIBLE, LEVELS, OBSERVE, PREPARE
+from .autonomy import EXECUTE_STAGED, IRREVERSIBLE, LEVELS, OBSERVE, PREPARE
 
-MAKER, CHECKER, COORDINATOR = "maker", "checker", "coordinator"
+MAKER, CHECKER, COORDINATOR, EXECUTOR = "maker", "checker", "coordinator", "executor"
 CORE, OPTIONS, SHARED = "core", "options", "shared"
 
 # The single sanctioned crossing point between the two books.
@@ -163,7 +163,68 @@ ROSTER: list[Agent] = [
                           "so it is worth sampling densely. It changes nothing."),
     ),
 
+    Agent(
+        name="intraday_bars", cadence_class="daily", signal_kind="price",
+        kind=MAKER, leg=SHARED, level=OBSERVE,
+        owns="minute bars for the traded names, and the compressed per-session features",
+        consumes=["Webull market data (via MCP)"],
+        produces="data/minute/*.csv + data/intraday/*.csv",
+        cadence="daily, after the close", module="app.data.minute", entrypoint="report",
+        why_that_cadence="One session of bars exists per day; there is nothing else to fetch.",
+        note=("CANNOT REFRESH ITSELF. The .env key authenticates but has no OpenAPI "
+              "market-data entitlement, so the store grows only via an in-session "
+              "harvest. report() says so out loud rather than looking idle — an "
+              "agent that silently stops fetching is indistinguishable from one "
+              "with nothing to do. 390 bars/session compress to ~15 numbers, which "
+              "is what keeps a year of history affordable."),
+    ),
+    Agent(
+        name="macro_series", cadence_class="monthly", signal_kind="macro",
+        kind=MAKER, leg=SHARED,
+        owns="the published macro series every doctrine is graded against",
+        consumes=["FRED"], produces="data/macro_series/*.csv",
+        cadence="monthly", module="app.macro.series", entrypoint="report",
+        why_that_cadence=("Most series print monthly or quarterly. A daily pull "
+                          "re-reads the same observation thirty times."),
+        note=("Exists to stop doctrine_tracker supplying its own evidence. "
+              "doctrine.py originally fetched the series it then graded — the same "
+              "shape of error as thesis_ledger passing ANET on its own preferred "
+              "margin. A failed pull leaves the prior cache intact and is reported, "
+              "so a doctrine reading stale data can say so."),
+    ),
+
     # ---------------- CHECKERS: judge, never generate ----------------------
+    Agent(
+        name="exit_auditor", cadence_class="monthly", signal_kind="verdict",
+        kind=CHECKER, leg=SHARED,
+        owns="whether the flat exit thresholds fit the names they are applied to",
+        consumes=["intraday_bars", "price_history"],
+        produces="per-name excursion profile + a verdict on the 15% / 20% levels",
+        cadence="monthly", module="app.analytics.intraday", entrypoint="report",
+        why_that_cadence=("Exit POLICY is a quarters-scale decision. Re-grading it "
+                          "weekly would invite tuning the stop to last week's tape, "
+                          "which is the failure trials_auditor exists to price."),
+        note=("Measures, never sets — exit_plans.py owns the policy and this grades "
+              "it. The finding that motivated it: over 64 sessions, a 15% max-loss "
+              "was breached on 79% of MRVL entries (median 21-session MAE -25.7%) "
+              "and 0% of NVDA's (-6.4%). The same number is simultaneously "
+              "hair-trigger and decorative depending on the name."),
+    ),
+    Agent(
+        name="doctrine_tracker", cadence_class="monthly", signal_kind="verdict",
+        kind=CHECKER, leg=SHARED,
+        owns="whether a structural thesis is confirmed by what the world published",
+        consumes=["macro_series", "macro_signals"],
+        produces="CONFIRMED / CONTRADICTED / PENDING per indicator, per doctrine",
+        cadence="monthly", module="app.macro.doctrine", entrypoint="report",
+        why_that_cadence=("The fastest indicator is a daily credit spread and most "
+                          "are monthly or quarterly. Anything faster re-renders "
+                          "identical numbers and invites reading noise as news."),
+        note=("Graded on MECHANISM, never on price — price tests timing, and a "
+              "multi-year thesis judged on six months of tape says nothing. PENDING "
+              "is reported separately from CONTRADICTED so publication lag can "
+              "never masquerade as refutation."),
+    ),
     Agent(
         name="thesis_ledger", cadence_class="on_filing", signal_kind="verdict", kind=CHECKER, leg=CORE,
         owns="a verdict per core holding against checkpoints fixed in advance",
@@ -264,6 +325,31 @@ ROSTER: list[Agent] = [
               "vetoes covered calls on its shares, and a put is only sold on a name "
               "the core pool would genuinely own. Generates no research of its own."),
     ),
+
+    # ---------------- EXECUTOR: the hands. Named, so it is accountable. -----
+    Agent(
+        name="thomas", cadence_class="on_approval", signal_kind="execution",
+        kind=EXECUTOR, leg=SHARED, level=EXECUTE_STAGED,
+        owns="placing the approved orders, and reporting what actually filled",
+        consumes=["chief", "data/trade_plan.json", "live broker account"],
+        produces="fills, and the variance between intended and realised",
+        cadence="only when a human approves a staged order",
+        module="", entrypoint="",          # deliberately not invokable — see note
+        stages=[],
+        why_that_cadence=("There is no clock. Execution is triggered by an approval, "
+                          "never by a timer — a scheduled executor is an executor "
+                          "that can trade while nobody is watching."),
+        note=("NOT A PYTHON MODULE, on purpose. Thomas is the Claude-plus-MCP-plus-human "
+              "loop described in CLAUDE.md, and giving it a seat here makes the "
+              "execution boundary explicit and accountable instead of implicit. "
+              "Its charter: read the live account BEFORE anything, reconcile the plan "
+              "against it, present every order with its exit plan, place NOTHING "
+              "without an explicit yes, then report each fill with its slippage. "
+              "It originates no orders — it may only execute what the chief staged "
+              "and a human approved, and it may never widen size, add a symbol, or "
+              "invent an order the plan does not contain. It is the one seat that "
+              "cannot be promoted to run unattended."),
+    ),
 ]
 
 BY_NAME = {a.name: a for a in ROSTER}
@@ -345,7 +431,7 @@ def validate() -> list[str]:
 
 def order() -> list[Agent]:
     """Makers, then checkers, then the coordinator. Dependencies respected."""
-    rank = {MAKER: 0, CHECKER: 1, COORDINATOR: 2}
+    rank = {MAKER: 0, CHECKER: 1, COORDINATOR: 2, EXECUTOR: 3}
     return sorted(ROSTER, key=lambda a: (rank[a.kind], a.leg, a.name))
 
 
@@ -427,7 +513,8 @@ def _main() -> None:
         if a.kind != last:
             titles = {MAKER: "MAKERS — produce evidence, never grade it",
                       CHECKER: "CHECKERS — judge evidence, never produce it",
-                      COORDINATOR: "COORDINATOR — routes and gates, never researches"}
+                      COORDINATOR: "COORDINATOR — routes and gates, never researches",
+                      EXECUTOR: "EXECUTOR — places approved orders, originates none"}
             print(f"\n  {titles[a.kind]}")
             print("  " + "-" * 74)
             last = a.kind

@@ -289,10 +289,19 @@ def test_an_explicit_start_rearms_the_breaker():
     loop = ll.LiveLoop(_ExplodingPortal(), interval=1)
     loop.tripped = True
     loop.consecutive_errors = ll.MAX_CONSECUTIVE_ERRORS
-    loop.start()
+
+    # start() rearms synchronously (tripped=False, errors=0) and only THEN
+    # spawns the worker. Against _ExplodingPortal that worker fails on its very
+    # first cycle, so asserting `consecutive_errors == 0` afterwards races the
+    # thread — it passes only when the assertion wins. Assert the rearm on the
+    # status start() returns, and on the invariant that survives the race: the
+    # breaker needs MAX_CONSECUTIVE_ERRORS fresh failures to trip again, so a
+    # rearmed loop is always strictly below that bar right after starting.
+    status = loop.start()
     try:
+        assert status["tripped"] is False
         assert loop.tripped is False
-        assert loop.consecutive_errors == 0
+        assert loop.consecutive_errors < ll.MAX_CONSECUTIVE_ERRORS
     finally:
         loop.stop()
 

@@ -66,9 +66,12 @@ class RSIReversion(Strategy):
         return []
 
 
+from .band import VolatilityBand  # noqa: E402  (registered below)
+
 STRATEGY_REGISTRY: dict[str, type[Strategy]] = {
     SMACrossover.name: SMACrossover,
     RSIReversion.name: RSIReversion,
+    VolatilityBand.name: VolatilityBand,
 }
 
 

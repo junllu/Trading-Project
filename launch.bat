@@ -56,6 +56,19 @@ REM 4. First-run config scaffolding.
 if not exist ".env" if exist ".env.example" copy ".env.example" ".env" >nul
 if not exist "config\config.yaml" if exist "config\config.example.yaml" copy "config\config.example.yaml" "config\config.yaml" >nul
 
+REM 3c. Tier-2 research pulls (OPTIONAL, background, never blocks the dashboard).
+REM The portal holds no broker credentials, so peer multiples and growth history
+REM can only be fetched by a Claude session with the robinhood-trading MCP. The
+REM scheduled 6am task covers weekdays; this catches the case where the machine
+REM was off then. -IfNeeded exits instantly if today's snapshot already exists,
+REM so launching five times a day does not start five Claude sessions.
+REM
+REM Detached and non-fatal ON PURPOSE: this is the path you double-click to see
+REM your book. It must never hang on a Claude session, an auth prompt, or a
+REM missing CLI. If the pull fails you get a stale snapshot, not a dead launcher.
+echo [3c/4] Checking Tier-2 research pulls in the background ^(optional^)...
+start "" /B powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\daily_mcp_pulls.ps1" -IfNeeded >nul 2>&1
+
 echo.
 echo ======================================
 echo   Starting the portal...

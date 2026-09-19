@@ -1,0 +1,345 @@
+<title>Training Record</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2128; --line:#30363d;
+    --fg:#e6edf3; --muted:#8b949e; --green:#3fb950; --red:#f85149;
+    --amber:#d29922; --accent:#58a6ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
+  header{display:flex;align-items:center;gap:10px;padding:10px 16px;
+         border-bottom:1px solid var(--line);background:var(--panel);
+         position:sticky;top:0;z-index:5;flex-wrap:wrap}
+  h1{font-size:14px;margin:0;letter-spacing:.02em}
+  .pill{border:1px solid var(--line);border-radius:99px;padding:2px 9px;
+        font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+  .pill.sim{border-color:var(--amber);color:var(--amber)}
+  main{padding:14px 16px;display:grid;gap:14px;
+       grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px}
+  .card.wide{grid-column:1/-1}
+  h2{font-size:11px;text-transform:uppercase;letter-spacing:.07em;
+     color:var(--muted);margin:0 0 8px;font-weight:600}
+  table{width:100%;border-collapse:collapse}
+  th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.05em;
+     color:var(--muted);font-weight:600;padding:4px 6px;border-bottom:1px solid var(--line)}
+  td{padding:4px 6px;border-bottom:1px solid #21262d}
+  .num{text-align:right;font-variant-numeric:tabular-nums}
+  .kpi{display:flex;gap:22px;flex-wrap:wrap}
+  .kpi .v{font-size:20px;font-variant-numeric:tabular-nums;display:block}
+  .kpi .l{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;display:block}
+  .up{color:var(--green)} .down{color:var(--red)} .warn{color:var(--amber)}
+  .muted{color:var(--muted)}
+  .banner{grid-column:1/-1;border:1px solid var(--amber);border-radius:8px;
+          padding:9px 12px;background:#1f1a0d;color:var(--amber);font-size:12px}
+  .note{font-size:11px;color:var(--muted);margin-top:8px;line-height:1.6}
+  a{color:var(--accent)}
+  .scroll{max-height:420px;overflow:auto}
+  .tag{font-size:10px;border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:var(--muted)}
+  .st-filled{color:var(--green)} .st-rejected{color:var(--red)} .st-cancelled{color:var(--muted)}
+</style>
+
+<header>
+  <h1>◐ Training Record</h1>
+  <span class="pill sim" id="modePill">simulated</span>
+  <span class="pill" id="brokerPill">—</span>
+  <span style="flex:1"></span>
+  <span class="muted" id="updated" style="font-size:11px"></span>
+  <a href="/" style="font-size:11px">real book →</a>
+</header>
+
+<main>
+  <!-- Stated once, permanently. A simulated fill shown next to a real position
+       is how one gets read as the other, which is the entire reason this page
+       is not the dashboard. -->
+  <div class="banner">
+    Everything here is <b>simulated</b>. These fills never touched a broker and no
+    approval gates them — paper money has nothing to protect, and gating it would
+    only starve the record this page exists to accumulate. Your real book lives on
+    the <a href="/">dashboard</a>.
+  </div>
+
+  <section class="card wide">
+    <h2>Simulated account — marked to the live feed</h2>
+    <div class="kpi">
+      <div><span class="v" id="aTotal">—</span><span class="l">Total value</span></div>
+      <div><span class="v" id="aPnl">—</span><span class="l">P&amp;L from inception</span></div>
+      <div><span class="v" id="aEarned">—</span><span class="l">Unrealized — SIM-OPENED</span></div>
+      <div><span class="v" id="aInherited">—</span><span class="l">Unrealized — seeded</span></div>
+      <div><span class="v" id="aUnreal">—</span><span class="l">Unrealized (all)</span></div>
+      <div><span class="v" id="aReal">—</span><span class="l">Realized (closed)</span></div>
+      <div><span class="v" id="aCash">—</span><span class="l">Cash</span></div>
+      <div><span class="v" id="aPos">—</span><span class="l">Open positions</span></div>
+    </div>
+    <div class="note" id="aNote"></div>
+    <div class="scroll" style="max-height:230px;margin-top:10px">
+      <table>
+        <thead><tr><th>Symbol</th><th class="num">Qty</th><th class="num">Cost</th>
+          <th class="num">Last</th><th class="num">Value</th>
+          <th class="num">Unrealized</th><th>Plan vs reality</th></tr></thead>
+        <tbody id="aRows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Heartbeat — is anything silently dead</h2>
+    <table><tbody id="hbRows"></tbody></table>
+    <div class="note" id="hbNote"></div>
+  </section>
+
+  <section class="card">
+    <h2>Agents — what ran, and when</h2>
+    <div class="scroll" style="max-height:300px">
+      <table><tbody id="agRows"></tbody></table>
+    </div>
+    <div class="note" id="agNote"></div>
+  </section>
+
+  <section class="card wide">
+    <h2>Simulated track record</h2>
+    <div class="kpi">
+      <div><span class="v" id="kFills">—</span><span class="l">Fills</span></div>
+      <div><span class="v" id="kOrders">—</span><span class="l">Orders recorded</span></div>
+      <div><span class="v" id="kRealized">—</span><span class="l">Realized (closed)</span></div>
+      <div><span class="v" id="kRT">—</span><span class="l">Round trips</span></div>
+      <div><span class="v" id="kNotional">—</span><span class="l">Notional traded</span></div>
+      <div><span class="v" id="kWindow">—</span><span class="l">Recording since</span></div>
+    </div>
+    <div class="note" id="realizedNote"></div>
+  </section>
+
+  <section class="card wide">
+    <h2>By sleeve — which engine is actually working</h2>
+    <table>
+      <thead><tr>
+        <th>Strategy</th><th class="num">Orders</th><th class="num">Fills</th>
+        <th class="num">Notional</th><th class="num">Attributed P&amp;L</th><th class="num">Round trips</th>
+      </tr></thead>
+      <tbody id="sleeves"></tbody>
+    </table>
+    <div class="note">
+      Attribution matches each sleeve's sells against <b>its own</b> buys only. These
+      figures do not sum to the book figure above whenever one sleeve sells what
+      another bought — they answer "was this engine any good", not "what did the
+      account make". Quoting either as the other is wrong.
+    </div>
+  </section>
+
+  <section class="card wide">
+    <h2>Every order, most recent first &nbsp;·&nbsp;
+        <span class="muted" style="text-transform:none;font-weight:400">
+          filled value shown: <b id="ordersTraded">—</b></span></h2>
+    <div class="scroll">
+      <table>
+        <thead><tr>
+          <th>When</th><th>Symbol</th><th>Side</th><th class="num">Qty</th>
+          <th class="num">Amount</th><th>Status</th><th class="num">Price</th>
+          <th>Sleeve</th><th>Thesis &amp; trigger</th>
+        </tr></thead>
+        <tbody id="orders"></tbody>
+      </table>
+    </div>
+    <div class="note">
+      Rejections and declines are kept on purpose. A record of only the orders that
+      worked is how a simulation acquires an imaginary hit rate.
+    </div>
+  </section>
+</main>
+
+<script>
+  const $ = id => document.getElementById(id);
+  const money = v => (v==null||isNaN(v)) ? "—"
+      : (v<0?"-":"") + "$" + Math.abs(v).toLocaleString(undefined,{maximumFractionDigits:2});
+  const cls = v => v>0 ? "up" : (v<0 ? "down" : "");
+
+  // One line per play: what was planned at entry, and where it actually sits.
+  // A position seeded before this system existed has no plan and says so —
+  // "no plan" and "in plan" are different states and must not look alike.
+  function planCell(p){
+    const pl = p.plan;
+    if (!pl) return '<span class="muted">no entry plan — seeded before the sim</span>';
+    const hit = (pl.targets_hit||[]);
+    const tgts = (pl.targets_pct||[])
+      .map(g => hit.includes(g)
+        ? `<span class="up">+${g}%&#10003;</span>`
+        : `<span class="muted">+${g}%</span>`).join(' ');
+    const statusCls = pl.status==='STOP BREACHED' ? 'down'
+                    : (hit.length ? 'up' : 'muted');
+    const room = pl.room_to_stop_pct;
+    return `<div><span class="${statusCls}"><b>${pl.status}</b></span>
+              &nbsp;stop ${pl.stop_pct}% @ ${pl.stop_price!=null?pl.stop_price.toFixed(2):'—'}
+              ${room!=null?`<span class="muted">(${room>0?'+':''}${room}% away)</span>`:''}</div>
+            <div>${tgts}</div>
+            <div class="muted" style="font-size:10px">entry ${pl.entry_price ?? '—'}
+              ${pl.vs_entry_pct!=null?`· ${pl.vs_entry_pct>0?'+':''}${pl.vs_entry_pct}% vs entry`:''}
+              · ${pl.stop_basis||''}</div>`;
+  }
+
+  async function refresh(){
+    try{
+      const [b, st, acct, hb, ag] = await Promise.all([
+        fetch('/api/blotter?limit=300').then(r=>r.json()),
+        fetch('/api/status').then(r=>r.json()).catch(()=>null),
+        fetch('/api/training/account').then(r=>r.json()).catch(()=>null),
+        fetch('/api/heartbeat').then(r=>r.json()).catch(()=>null),
+        fetch('/api/agents').then(r=>r.json()).catch(()=>null),
+      ]);
+
+      // --- account: the bottom line, marked live ---
+      if (acct && acct.available){
+        $("aTotal").textContent  = money(acct.total_value);
+        $("aPnl").textContent    = money(acct.pnl_from_inception)
+          + (acct.pnl_from_inception_pct!=null ? ` (${acct.pnl_from_inception_pct>0?'+':''}${acct.pnl_from_inception_pct}%)` : '');
+        $("aPnl").className      = "v " + cls(acct.pnl_from_inception);
+        $("aUnreal").textContent = money(acct.unrealized);
+        $("aUnreal").className   = "v " + cls(acct.unrealized);
+        const sd = acct.seeded || {}, aq = acct.acquired || {};
+        $("aEarned").textContent    = money(aq.unrealized) + ` (${aq.count||0})`;
+        $("aEarned").className      = "v " + cls(aq.unrealized);
+        $("aInherited").textContent = money(sd.unrealized) + ` (${sd.count||0})`;
+        $("aInherited").className   = "v muted";
+        $("aReal").textContent   = money(acct.realized_closed);
+        $("aReal").className     = "v " + cls(acct.realized_closed);
+        $("aCash").textContent   = money(acct.cash);
+        $("aPos").textContent    = acct.open_positions;
+        [ "aPnl","aTotal","aCash" ].forEach(id => $(id).style.fontSize = "17px");
+
+        const inc = acct.inception || {};
+        $("aNote").innerHTML =
+          `Inception ${money(inc.value)}${inc.reconstructed
+            ? ' <b>(reconstructed</b> from the seed — holdings x last-synced price + cash, not measured at the time)'
+            : ` on ${inc.as_of}`}.
+           Unrealized is marked to the live feed; realized counts only round trips
+           opened <i>and</i> closed inside this record.`
+          + (acct.unpriced && acct.unpriced.length
+             ? ` <span class="warn">Excluded, no live price: ${acct.unpriced.join(', ')}.</span>` : '');
+
+        $("aRows").innerHTML = (acct.positions||[]).map(p=>`
+          <tr><td><b>${p.symbol}</b></td>
+            <td class="num">${p.quantity}</td>
+            <td class="num">${p.avg_price!=null?p.avg_price.toFixed(2):'—'}</td>
+            <td class="num">${p.last!=null?p.last.toFixed(2):'—'}</td>
+            <td class="num">${money(p.value)}</td>
+            <td class="num ${cls(p.unrealized)}">${money(p.unrealized)}${
+              p.unrealized_pct!=null?` <span class="muted">(${p.unrealized_pct>0?'+':''}${p.unrealized_pct}%)</span>`:''}</td>
+            <td>${p.origin==='seeded'
+                  ? '<span class="tag">seeded</span>'
+                  : '<span class="tag" style="border-color:var(--accent);color:var(--accent)">sim</span>'}
+                ${planCell(p)}</td></tr>`).join('');
+      }
+
+      // --- heartbeat ---
+      if (hb){
+        const mark = {OK:'up', STALE:'down', NEVER:'down', IDLE:'muted'};
+        $("hbRows").innerHTML = (hb.checks||[]).map(c=>`
+          <tr><td class="${mark[c.status]||''}">${c.status}</td>
+            <td><b>${c.name}</b><div class="muted" style="font-size:10px">${c.cadence}</div></td>
+            <td class="num muted">${c.age_minutes!=null?Math.round(c.age_minutes)+'m':'—'}</td></tr>`).join('');
+        $("hbNote").textContent = hb.healthy
+          ? `Everything inside its window · market ${hb.market_session}.`
+          : `ATTENTION: ${(hb.unhealthy||[]).join(', ')}. NEVER means it has never produced output — a different problem from STALE.`;
+        $("hbNote").className = hb.healthy ? "note" : "note warn";
+      }
+
+      // --- agents ---
+      if (ag){
+        const rows = ag.agents || ag.roster || [];
+        $("agRows").innerHTML = rows.map(a=>{
+          const last = a.last_run || a.last_ran || null;
+          const never = !last;
+          return `<tr>
+            <td><b>${a.name}</b><div class="muted" style="font-size:10px">${a.cadence||a.cadence_class||''}</div></td>
+            <td class="muted" style="font-size:11px">${never?'never run':new Date(last).toLocaleString()}</td>
+            <td>${a.due ? '<span class="warn">due</span>' : ''}</td></tr>`;
+        }).join('') || '<tr><td class="muted">no agent state</td></tr>';
+        const q = ag.human_queue || [];
+        $("agNote").innerHTML = q.length
+          ? `<span class="warn">Needs a human:</span> ${q[0]}`
+          : 'Nothing waiting on a human.';
+      }
+      const s = b.summary || {}, r = s.realized || {};
+
+      $("kFills").textContent    = s.fills ?? "—";
+      $("kOrders").textContent   = s.orders_recorded ?? "—";
+      $("kRealized").textContent = money(r.realized_usd);
+      $("kRealized").className   = "v " + cls(r.realized_usd);
+      $("kRT").textContent       = r.round_trips ?? "—";
+      $("kNotional").textContent = money(s.filled_notional_usd);
+      $("kWindow").textContent   = s.first ? s.first.split(" ")[0] : "—";
+      $("kWindow").style.fontSize = "13px";
+
+      const um = r.unmatched_sells || {};
+      const umKeys = Object.keys(um);
+      $("realizedNote").innerHTML = umKeys.length
+        ? `Closed round-trips only. ${umKeys.length} symbol(s) sold without a buy in this
+           record (${umKeys.join(", ")}) — those are seeded holdings with no cost basis here,
+           counted as unmatched rather than as profit.`
+        : "Closed round-trips only. Open positions are not marked to market here.";
+
+      // Mode / broker: proof this page can never be describing real money.
+      if (st){
+        const t = st.execution_target || {};
+        $("modePill").textContent = st.mode || "—";
+        $("brokerPill").textContent = "fills on: " + (t.broker || "—");
+        if (t.simulated === false){
+          $("brokerPill").className = "pill";
+          $("brokerPill").style.borderColor = "var(--red)";
+          $("brokerPill").style.color = "var(--red)";
+          $("brokerPill").textContent = "LIVE BROKER: " + t.broker;
+        }
+      }
+
+      const bs = s.by_strategy || {};
+      const names = Object.keys(bs).sort();
+      $("sleeves").innerHTML = names.length ? names.map(n=>{
+        const v = bs[n], a = v.attributed || {};
+        return `<tr><td><b>${n}</b></td>
+          <td class="num">${v.orders}</td>
+          <td class="num">${v.fills}</td>
+          <td class="num">${money(v.filled_notional_usd)}</td>
+          <td class="num ${cls(a.realized_usd)}">${money(a.realized_usd)}</td>
+          <td class="num">${a.round_trips ?? 0}</td></tr>`;
+      }).join("") : `<tr><td colspan="6" class="muted">nothing recorded yet</td></tr>`;
+
+      const rows = b.rows || [];
+      const amountOf = o => (o.amount!=null) ? o.amount
+        : ((o.quantity!=null && o.filled_price!=null) ? o.quantity*o.filled_price : null);
+      let traded = 0;
+      rows.forEach(o=>{ if(o.status==='filled'){ const a=amountOf(o); if(a) traded+=a; } });
+
+      $("orders").innerHTML = rows.length ? rows.map(o=>{
+        const amt = amountOf(o);
+        const t = o.thesis;
+        // The stated case at entry, beside the trigger that fired. A record of
+        // WHAT was traded without WHY leaves the thesis to be reconstructed
+        // from memory, which is how a strategy becomes whatever its author now
+        // believes it was.
+        const thesis = t
+          ? `<div><b>stop ${t.stop_pct}%</b> @ ${t.stop_price!=null?t.stop_price.toFixed(2):'—'}
+               · targets ${(t.targets_pct||[]).map(g=>'+'+g+'%').join(' / ')||'—'}
+               <span class="tag">${t.pool||''}</span></div>
+             <div class="muted" style="font-size:10px">${t.stop_basis||''}</div>`
+          : '';
+        return `<tr><td class="muted">${o.when || ""}</td>
+          <td><b>${o.symbol ?? ""}</b></td>
+          <td>${o.side ?? ""}</td>
+          <td class="num">${o.quantity ?? ""}</td>
+          <td class="num">${amt!=null?money(amt):"—"}</td>
+          <td class="st-${o.status}">${o.status ?? ""}</td>
+          <td class="num">${o.filled_price!=null ? o.filled_price.toFixed(2) : "—"}</td>
+          <td><span class="tag">${o.strategy || "unknown"}</span></td>
+          <td class="muted">${thesis}<div>${o.reason || ""}</div></td></tr>`;
+      }).join("")
+        : `<tr><td colspan="9" class="muted">no orders recorded yet — run the agent
+             (<code>python -m app.agent</code>) or start the loop from the dashboard</td></tr>`;
+      $("ordersTraded").textContent = money(traded);
+
+      $("updated").textContent = "updated " + new Date().toLocaleTimeString();
+    }catch(e){ /* keep the last good render */ }
+  }
+
+  refresh();
+  setInterval(refresh, 15000);
+</script>

@@ -114,18 +114,31 @@ def _price_state(symbol: str) -> tuple[int, str | None, list[float]]:
 
 
 def _snapshot_has(symbol: str, prefix: str) -> bool:
-    """Is this symbol present in the newest dated snapshot of that kind?"""
+    """Do we have this symbol in ANY dated snapshot of that kind?
+
+    Coverage and freshness are different questions and this one is coverage.
+    Reading only the newest file conflated them: a snapshot written for nine
+    shortlist names superseded the previous day's full-book file, and 29 held
+    symbols were reported as missing fundamentals they already had. The pull
+    queue then asked for data sitting on disk.
+
+    Newest-first so the common case exits on the first file. A point-in-time
+    VALUE still comes from a specific dated snapshot; this only answers whether
+    the symbol has ever been covered.
+    """
     if not FUNDAMENTALS_DIR.exists():
         return False
     pattern = "filings_*.json" if prefix == "filings" else "????-??-??.json"
-    files = sorted(FUNDAMENTALS_DIR.glob(pattern))
-    if not files:
-        return False
-    try:
-        d = json.loads(files[-1].read_text(encoding="utf-8"))
-        return symbol.upper() in (d.get("symbols") or {})
-    except Exception:
-        return False
+    files = sorted(FUNDAMENTALS_DIR.glob(pattern), reverse=True)
+    sym = symbol.upper()
+    for f in files:
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if sym in (d.get("symbols") or {}):
+            return True
+    return False
 
 
 def fetch_prices(symbol: str, start: str = "2022-01-01") -> tuple[bool, str]:

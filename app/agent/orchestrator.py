@@ -150,8 +150,21 @@ def run_due(force: bool = False) -> dict:
 
     for d in what_is_due():
         a = d.agent
-        if a.kind == "coordinator":
-            skipped[a.name] = "coordinator — its output is a human queue, not a job"
+        # The coordinator USED to be excluded here, with the reason "its output
+        # is a human queue, not a job". That conflated two different things:
+        # reading the queue is the human's job, but PRODUCING it is not. The
+        # exclusion meant the chief never ran once — it showed "never run" while
+        # every checker beneath it reported on schedule, so their findings were
+        # assembled into a decision queue only when someone typed the module
+        # name. Everything downstream of it (the PM's findings, the posture
+        # board) inherited that dead end.
+        #
+        # It is safe to run: build_queue() only calls checker report() functions
+        # and assembles Decision records. It stages nothing and executes
+        # nothing — irreversible items are MARKED "PARK", and producing that
+        # marking is precisely the work that should happen automatically.
+        if a.kind == "coordinator" and not a.entrypoint:
+            skipped[a.name] = "coordinator has no entrypoint wired"
             continue
         if not (d.due or (force and a.entrypoint)):
             skipped[a.name] = d.reason

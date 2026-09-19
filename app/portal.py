@@ -28,7 +28,7 @@ from .engine.sizing import SizingParams
 from .intel import IntelService
 from .intel.claude_analyst import ClaudeAnalyst
 from .ml import build_forecaster
-from .models import Signal
+from .models import Side, Signal
 from .options import (
     cash_secured_put_candidates,
     covered_call_candidates,
@@ -77,8 +77,26 @@ class Portal:
         paper = self.brokers.get("paper")
         live = {k: v for k, v in self.brokers.items() if k != "paper"}
 
-        # Primary market-data source: first live broker, else paper.
-        self.market.set_primary(live[next(iter(live))] if live else paper)
+        # Primary market-data source: a live broker if one exists, otherwise the
+        # REAL cached prices — never the paper broker.
+        #
+        # Pointing this at `paper` made the simulator ask itself what things were
+        # worth and get back the values seeded from holdings.yaml at startup. The
+        # prices then never moved, so a buy and a sell of the same name netted
+        # exactly zero by construction and 27 fills marked to market returned
+        # 0.00% across the board. That is a closed loop measuring itself, and it
+        # rendered every result the training loop produced meaningless while
+        # looking entirely healthy.
+        if live:
+            self.market.set_primary(live[next(iter(live))])
+        else:
+            # Live first, cached behind it. The live source is an in-process
+            # HTTP call rather than a Claude session, so the whole universe can
+            # be priced every tick at no marginal cost; when it fails the local
+            # stores answer, and a price is never fabricated to fill the gap.
+            from .data.tradingview_quotes import LiveThenCached
+            self.quote_source = LiveThenCached()
+            self.market.set_primary(self.quote_source)
 
         self.risk = RiskManager(self.settings.risk, allowed_symbols=self.settings.watchlist)
         self.executor = Executor(
@@ -96,8 +114,19 @@ class Portal:
         # Seed the real holdings snapshot into the paper broker (until live sync).
         self.held_symbols = []
         if paper is not None:
+            # The simulated book persists across restarts. holdings.yaml is the
+            # SEED for day one only — after that the simulation owns its own
+            # positions and diverges from the real book, which is the point. A
+            # re-seed on every start meant a swing position bought yesterday did
+            # not exist this morning, and a trimmed one came back whole.
+            from .portfolio import sim_account
+            restored = sim_account.load(paper)
             holdings = load_holdings()
-            if holdings:
+            if restored:
+                self.held_symbols = [p.symbol for p in paper.get_positions()]
+                log.info("simulated account restored from %s — %d position(s), cash $%.2f",
+                         restored.get("as_of"), len(self.held_symbols), paper.cash)
+            elif holdings:
                 self.held_symbols = seed_paper_broker(paper, holdings)
                 # Tracking a REAL book: use real uninvested cash (holdings.yaml
                 # `cash:`), not the simulated $100k paper default. Unknown => 0,
@@ -239,6 +268,16 @@ class Portal:
     def tick(self) -> dict[str, Any]:
         self.ensure_built()
         symbols = self._all_symbols()
+        # One request for the whole universe before quoting any of it. Without
+        # this, `refresh` would make a separate call per symbol — thirty-plus
+        # round trips a tick, which is both slow and a good way to get rate
+        # limited off an endpoint nobody promised us.
+        primer = getattr(self.quote_source, "prime", None)
+        if callable(primer):
+            try:
+                primer(symbols)
+            except Exception:
+                log.exception("live quote prime failed — falling back to cached")
         quotes = self.market.refresh(symbols)
         prices = {s: q.price for s, q in quotes.items()}
 
@@ -246,23 +285,85 @@ class Portal:
         # execution before any new signal is evaluated.
         self.enforce_campaign()
 
+        # Collect EVERY signal before placing any of them.
+        #
+        # The daily order budget is finite and was being spent first-come,
+        # first-served: whichever sleeve happened to iterate first consumed it,
+        # and 20 of 21 rejections in one session were "daily order limit
+        # reached". sma_crossover got 1 fill from 8 attempts — starved by
+        # arrival order rather than outperformed, which makes its sample
+        # unmeasurable and biases every expectancy number computed downstream.
+        #
+        # Ranking by signal strength means the budget buys the highest-
+        # conviction decisions rather than the earliest ones. That is also the
+        # sample the strategy would actually want measured.
         fired: list[Signal] = []
         assert self.executor is not None
+        candidates: list[tuple[Signal, float]] = []
         for run in self.strategy_runs:
             for symbol in run.symbols:
+                # Cost basis and original size travel with the context because
+                # a band strategy trades against what it PAID, not against an
+                # indicator. StrategyContext deliberately exposes little, so
+                # these go through params rather than widening it for everyone.
+                params = dict(run.strategy.params)
+                pos = self._position_for(symbol)
+                if pos is not None:
+                    params.setdefault("avg_price", pos.avg_price)
+                    plan = None
+                    try:
+                        from .agent import position_plans
+                        plan = position_plans.get(symbol)
+                    except Exception:
+                        plan = None
+                    params.setdefault(
+                        "original_qty",
+                        float(plan.get("quantity")) if plan and plan.get("quantity")
+                        else pos.quantity)
                 ctx = StrategyContext(
                     symbol=symbol,
                     history=self.market.history(symbol),
                     position_qty=self._position_qty(symbol),
-                    params=run.strategy.params,
+                    params=params,
                 )
                 for sig in run.strategy.evaluate(ctx):
-                    fired.append(sig)
-                    self.signal_log.append(sig)
-                    self.executor.handle_signal(sig, prices.get(symbol, 0.0))
+                    candidates.append((sig, prices.get(symbol, 0.0)))
+
+        # SELLs first regardless of strength: an exit blocked by an entry that
+        # spent the last order is a risk failure, not a scheduling detail.
+        candidates.sort(key=lambda cs: (cs[0].side is not Side.SELL,
+                                        -float(getattr(cs[0], "strength", 0.0) or 0.0)))
+        for sig, px in candidates:
+            fired.append(sig)
+            self.signal_log.append(sig)
+            self.executor.handle_signal(sig, px)
+
+        # Exits run every tick, AFTER entries. A position opened this tick is
+        # graded against its own exit plan on the next one, never in the same
+        # breath — an entry and its exit firing together is a sizing bug
+        # wearing the costume of a strategy.
+        exits: dict[str, Any] = {}
+        try:
+            from .agent.exit_monitor import run as run_exits
+            exits = run_exits(self, act=True)
+        except Exception:
+            log.exception("exit monitor failed")   # never kill the tick
+
+        # Persist after every tick, not only at shutdown. An unattended loop is
+        # killed far more often than it is closed cleanly, and a day of
+        # simulated trades that only exists in memory is a day of evidence lost.
+        paper = self.brokers.get("paper")
+        if paper is not None:
+            try:
+                from .portfolio import sim_account
+                sim_account.save(paper, note="tick")
+            except Exception:
+                log.exception("simulated account save failed")
 
         self.signal_log = self.signal_log[-200:]
-        return {"prices": prices, "signals_fired": len(fired)}
+        return {"prices": prices, "signals_fired": len(fired),
+                "exits_fired": len(exits.get("actions") or []),
+                "exits_placed": len((exits.get("execution") or {}).get("placed") or [])}
 
     # helpers ---------------------------------------------------------------
     def _all_symbols(self) -> list[str]:
@@ -424,6 +525,17 @@ class Portal:
             "sell_the_news": stn,
         }
 
+    def _position_for(self, symbol: str):
+        """The consolidated position in one symbol, or None."""
+        for _name, broker in self.brokers.items():
+            try:
+                for p in broker.get_positions():
+                    if p.symbol == symbol:
+                        return p
+            except Exception:
+                continue
+        return None
+
     def _position_qty(self, symbol: str) -> float:
         if self.portfolio is None:
             return 0.0
@@ -465,6 +577,20 @@ class Portal:
         prices: dict[str, float] = {}
         for s in self._all_symbols():
             last = self.market.last(s)
+            # A synthetic quote is a RANDOM WALK, and feeding one into the
+            # portfolio valuation fabricates equity: NEWYY, delisted and with no
+            # feed anywhere, drifted to $291.09 against a $5.99 cost and showed
+            # +4,759% / +$26,229, inflating the book to $162,574 against a real
+            # $135,862. Trading already refuses these prices; valuation must
+            # too. Carried at cost basis instead, which is what an unpriceable
+            # holding is actually worth to this record.
+            if last is not None and not self.market.is_real(s):
+                # Omitted entirely rather than substituted. PortfolioService
+                # falls back to the position's own avg_price, so an unpriceable
+                # holding is carried at cost — the honest value — instead of at
+                # a number a random walk invented or at a seeded price that may
+                # itself have drifted.
+                continue
             if last is not None:
                 prices[s] = last.price
             elif paper is not None:
@@ -474,6 +600,7 @@ class Portal:
         snap = self.portfolio.snapshot(prices) if self.portfolio else {}
         return {
             "mode": self.settings.mode.value,
+            "execution_target": self.execution_target(),
             "killed": self.executor.killed,
             "loop_running": bool(self._thread and self._thread.is_alive()),
             "risk": self.risk.status(),
@@ -488,6 +615,35 @@ class Portal:
             "schedule": self.scheduler.status() if self.scheduler else {},
             "orchestrator": self.orchestrator.status() if self.orchestrator else {},
             "campaign": self.campaign.status(self._book_value()).to_dict() if self.campaign else {},
+        }
+
+    def execution_target(self) -> dict[str, Any]:
+        """Which broker an APPROVED order would actually reach, stated plainly.
+
+        `confirm` does not mean "paper". It means "live, staged for approval",
+        and it lands on the paper broker today only because no live broker is
+        enabled in config.yaml. Enabling one would silently convert an approval
+        click from a simulated fill into real money — the same click, the same
+        screen, a different consequence.
+
+        So the resolved target is reported rather than inferred. A guardrail
+        nobody can see is a guardrail nobody can check.
+        """
+        self.ensure_built()
+        from .models import Order, Side
+        probe = Order(symbol="__PROBE__", side=Side.BUY, quantity=0)
+        try:
+            broker = self.executor._broker_for(probe)
+            name = getattr(broker, "name", type(broker).__name__)
+        except Exception as exc:
+            return {"broker": None, "simulated": None, "error": str(exc)}
+        simulated = name == "paper"
+        return {
+            "broker": name,
+            "simulated": simulated,
+            "live_brokers_enabled": sorted(self.executor.live_brokers),
+            "warning": None if simulated else
+                       f"approved orders execute on {name} with REAL money",
         }
 
     @staticmethod
