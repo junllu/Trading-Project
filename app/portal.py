@@ -282,7 +282,8 @@ class Portal:
         """
         holdings = load_holdings()
         if holdings:
-            total = float(load_cash() or 0.0)
+            from .portfolio.holdings import load_other_value
+            total = float(load_cash() or 0.0) + load_other_value()
             for h in holdings:
                 sym = str(h["symbol"]).upper()
                 q = self.market.last(sym)
