@@ -172,7 +172,8 @@ def _held() -> list[str]:
         return []
 
 
-def targets(symbols: list[str] | None = None) -> dict[str, set[str]]:
+def targets(symbols: list[str] | None = None,
+            stores: tuple[str, ...] = ("prices", "ohlc")) -> dict[str, set[str]]:
     """Which store each symbol belongs in: {symbol: {"prices", "ohlc"}}.
 
     Default scope is what is already cached plus the live book, so a new
@@ -180,18 +181,18 @@ def targets(symbols: list[str] | None = None) -> dict[str, set[str]]:
     whole OHLC universe: a dozen modules scan data/prices/, and a refresh
     should keep data current, not silently change what those scans cover.
     """
-    stores: dict[str, set[str]] = {}
+    out: dict[str, set[str]] = {}
 
     def add(sym: str, store: str) -> None:
         s = sym.upper()
         if s not in UNTRADEABLE:
-            stores.setdefault(s, set()).add(store)
+            out.setdefault(s, set()).add(store)
 
     if symbols:
         for s in symbols:
-            add(s, "prices")
-            add(s, "ohlc")
-        return stores
+            for st_ in stores:
+                add(s, st_)
+        return out
     for p in PRICES_DIR.glob("*.csv"):
         add(p.stem, "prices")
     for p in OHLC_DIR.glob("*.csv"):
@@ -201,7 +202,7 @@ def targets(symbols: list[str] | None = None) -> dict[str, set[str]]:
         add(s, "ohlc")
     for s in universe(include_held=False):
         add(s, "ohlc")
-    return stores
+    return out
 
 
 def _path(store: str, sym: str) -> Path:
@@ -210,10 +211,14 @@ def _path(store: str, sym: str) -> Path:
 
 # --- run ------------------------------------------------------------------
 def refresh(symbols: list[str] | None = None, now: datetime | None = None,
-            downloader=_download) -> dict:
-    """Bring every target file current. Returns the status it also writes."""
+            downloader=_download, stores: tuple[str, ...] = ("prices", "ohlc")) -> dict:
+    """Bring every target file current. Returns the status it also writes.
+
+    `stores` limits NEW symbols to one store — e.g. ohlc only for a research
+    universe, so the close store (scanned by a dozen modules) is not widened.
+    """
     through = last_complete_session(now)
-    plan = targets(symbols)
+    plan = targets(symbols, stores)
     names = sorted(plan)
     written, unchanged, failed = 0, 0, {}
 
@@ -280,6 +285,7 @@ def _main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("symbols", nargs="*")
     ap.add_argument("--status", action="store_true", help="report freshness only")
+    ap.add_argument("--ohlc-only", action="store_true", help="new symbols go to data/ohlc only")
     a = ap.parse_args()
     if a.status:
         through = last_complete_session()
@@ -288,7 +294,7 @@ def _main() -> None:
         for k, v in sorted(f["stale"].items()):
             print(f"  stale  {k:<18} last {v}")
         return
-    s = refresh(a.symbols or None)
+    s = refresh(a.symbols or None, stores=("ohlc",) if a.ohlc_only else ("prices", "ohlc"))
     print(f"expected last bar {s['expected_last_bar']}: wrote {s['written']}, "
           f"unchanged {s['unchanged']}, failed {len(s['failed'])}, "
           f"still stale {len(s['stale'])}/{s['files']}")
