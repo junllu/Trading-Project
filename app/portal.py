@@ -185,6 +185,13 @@ class Portal:
             execute=agent_cfg.get("execute", True), forecaster=forecaster,
         )
         def _scheduled_job():
+            # Task Scheduler may run the same cycle (app/agent/scheduled.py).
+            # Whoever claims the day first runs it; the other skips, so paper
+            # orders are never placed twice.
+            from .agent.scheduled import claim_today
+            if not claim_today("dashboard"):
+                log.info("daily cycle already ran today — dashboard schedule skipping")
+                return None
             auto = (self.settings.raw.get("autonomy") or {})
             if auto.get("daily_uses_autonomy_cycle", True):
                 return self.run_autonomy_cycle()

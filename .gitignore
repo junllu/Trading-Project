@@ -51,4 +51,4 @@ data/autonomy.json
 # ~29MB of regenerable market data that would bloat every clone. Refetch with
 # `python -m app.data.ohlc --universe` and `python -m app.data.minute --fetch`.
 # The specific rules above are kept for the notes they carry (see trials.jsonl).
-data/
+/data/

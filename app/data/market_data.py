@@ -7,12 +7,15 @@ series so the whole pipeline is exercisable offline.
 """
 from __future__ import annotations
 
+import logging
 import random
 from collections import defaultdict, deque
 from typing import Optional
 
 from ..brokers.base import BrokerBase, BrokerError
 from ..models import Quote
+
+log = logging.getLogger("portal")
 
 
 class MarketData:
@@ -90,6 +93,22 @@ class MarketData:
         try:
             from ..config import ROOT
             p = ROOT / "data" / "prices" / f"{symbol.upper()}.csv"
+            # A cache that EXISTS is not a cache that is CURRENT. Reading it
+            # unconditionally froze every signal at 2026-09-04 for three weeks.
+            # The scheduled refresh (app/data/refresh.py) is the primary fix;
+            # this catches a missed run before a stale history reaches a score.
+            if p.exists():
+                from .refresh import last_bar, last_complete_session, refresh
+                lb = last_bar(p)
+                if lb and lb < last_complete_session().isoformat():
+                    try:
+                        refresh([symbol])
+                    except Exception:
+                        pass
+                    lb2 = last_bar(p)
+                    if lb2 and lb2 < last_complete_session().isoformat():
+                        log.warning("price cache for %s ends %s — signals use stale history",
+                                    symbol, lb2)
             if p.exists():
                 import csv
                 closes = []
