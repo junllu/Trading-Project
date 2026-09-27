@@ -173,3 +173,10 @@ def test_rows_before_since_are_not_evidence(tmp_path, monkeypatch):
             {"AAA": _series(SESSIONS, [100, 101, 102, 103, 104, 110, 111])})
     rep = confidence.score_forward(5, since="2026-09-28")
     assert rep.excluded == 1 and rep.n == 1
+
+
+def test_weekend_rows_are_not_trading_days(tmp_path, monkeypatch):
+    _record(tmp_path, monkeypatch, [_row("2026-10-03T12:00:00-04:00", AAA=0.5)],   # Saturday
+            {"AAA": _series(SESSIONS, [100, 101, 102, 103, 104, 110, 111])})
+    rep = confidence.score_forward(5)
+    assert rep.n == 0 and rep.pending == 0

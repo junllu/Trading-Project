@@ -257,9 +257,32 @@ def live_loop_receipt() -> Receipt:
     return r
 
 
+# Routines whose runs are judged by the ops-health ledger (app/agent/ops_health.py):
+# one pass/fail per trading day, decided by whether the routine's ARTIFACT exists,
+# not by the scheduler's exit code.
+OPS_JOB_FOR_ROUTINE = {"daily_plan": "daily_cycle"}
+
+
+def ops_receipt(routine: str, job: str, ledger: dict | None = None) -> Receipt:
+    from .ops_health import ledger_by_job
+    days = (ledger if ledger is not None else ledger_by_job()).get(job, {})
+    r = Receipt(routine=routine)
+    r.runs = len(days)
+    r.passed = sum(1 for ok in days.values() if ok)
+    r.expected_runs = len(days)            # every judged trading day was due
+    if days:
+        r.last_run = max(days)
+    fails = sorted(d for d, ok in days.items() if not ok)
+    if len(fails) >= 2 and not days[max(days)]:
+        r.repeated_failures.append(f"failed on {', '.join(fails[-3:])}")
+    return r
+
+
 def audit() -> dict:
     state = _load_state()
     receipts = {"live_loop": live_loop_receipt()}
+    for routine, job in OPS_JOB_FOR_ROUTINE.items():
+        receipts[routine] = ops_receipt(routine, job)
     rows = []
     for rt in ROUTINES:
         rec = receipts.get(rt.name) or Receipt(routine=rt.name)

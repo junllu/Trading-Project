@@ -38,6 +38,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from ..config import ROOT
+from ..data.market_hours import is_trading_day
 
 RECORD_PATH = ROOT / "data" / "forward_record.jsonl"
 
@@ -176,6 +177,10 @@ def score_forward(horizon_days: int = 5, min_abs_score: float = 0.2,
         except Exception:
             continue
         day = rec_dt.strftime("%Y-%m-%d")
+        # A row written on a weekend or holiday (a manual --once run) is not a
+        # trading day; counting it would inflate the gate's day count.
+        if not is_trading_day(rec_dt.date()):
+            continue
 
         for c in r.get("convictions", []):
             sym, score = c["symbol"], float(c.get("score", 0))
