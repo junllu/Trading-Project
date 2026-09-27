@@ -19,6 +19,10 @@ $code = $LASTEXITCODE
 $out | ForEach-Object { "$_" } | Add-Content $log
 "=== exit $code ===" | Add-Content $log
 
+# Daily summary for remote reading — built after the health check so it
+# includes today's verdicts. A report failure never changes the exit code.
+& (Join-Path $repo ".venv\Scripts\python.exe") -m app.reports.daily_summary 2>&1 | Out-Null
+
 if ($code -ne 0) {
   $failed = ($out | Where-Object { "$_" -match "^\s+FAIL" } | ForEach-Object { ("$_" -replace "^\s+FAIL\s+", "").Trim() }) -join "`n"
   try {
