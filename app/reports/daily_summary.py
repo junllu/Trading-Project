@@ -96,7 +96,8 @@ def build() -> dict:
             "signals_today": todays, "closed_today": closed_today,
             "preview": preview.get("candidates_if_close_holds", [])[:15],
             "preview_as_of": preview.get("as_of_et"),
-            "gate": {k: sleeve.get(k) for k in ("gate", "recommended_sleeve_usd", "missing")}}
+            "gate": {k: sleeve.get(k) for k in ("gate", "recommended_sleeve_usd", "missing")},
+            "wheel": _read(DATA / "paper" / "wheel1" / "scorecard.json", {}) or {}}
 
 
 def to_markdown(r: dict) -> str:
@@ -274,6 +275,19 @@ def to_html(r: dict) -> str:
         out.append(f'<section><h2>Likely next signals</h2><div class="chips">{pv}</div>'
                    f'<p class="note">Below their levels as of {e(str(r["preview_as_of"]))} ET — '
                    'only a close below confirms.</p></section>')
+
+    wh = r.get("wheel") or {}
+    if wh.get("start"):
+        spy = wh.get("spy_equiv")
+        out.append('<section><h2>wheel1 · $50k puts → shares → calls</h2><div class="figs">'
+                   f'<div class="fig"><span>Equity</span><b>${wh["equity"]:,.0f}</b>'
+                   f'<small>SPY same $: {"$" + format(spy, ",.0f") if spy else "—"}</small></div>'
+                   f'<div class="fig"><span>Premium collected</span><b>${wh["premium_collected"]:,.0f}</b>'
+                   f'<small>{wh["puts_sold"]} puts · {wh["calls_sold"]} calls</small></div>'
+                   f'<div class="fig"><span>Assigned / called / stopped</span>'
+                   f'<b>{wh["assignments"]} / {wh["called_away"]} / {wh["stopped_out"]}</b>'
+                   f'<small>{wh["open_options"]} open · max DD {wh.get("max_dd_pct", 0)}%</small></div>'
+                   '</div></section>')
 
     jobs = "".join(f'<li><span class="pill {"ok" if j["ok"] else "bad"}">{"OK" if j["ok"] else "FAIL"}</span>'
                    f'<span><b>{e(j["job"])}</b> <span class="d">{e(j["detail"])}</span></span></li>'
