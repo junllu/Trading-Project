@@ -17,6 +17,14 @@ Two rules that keep this honest:
   2. Every conviction signal is benchmarked against simply holding the same
      name over the same window. "Was it right" is uninteresting; "did it beat
      doing nothing" is the question, because doing nothing keeps winning.
+  3. ONE SIGNAL PER NAME PER DAY. The live loop snapshots every 5 minutes, and
+     an earlier version graded every snapshot: 124 rows from 4 trading days
+     became "748 signals" and cleared a gate meant to need months. Ten
+     snapshots of MRVL on one morning are one opinion, not ten.
+  4. THE HORIZON IS TRADING SESSIONS. It was calendar days, so a Friday
+     signal's "5-day" window held three sessions.
+
+The capital gate itself lives in sleeve.py; this module only measures.
 
     python -m app.analytics.confidence
     python -m app.analytics.confidence --horizon 5
@@ -27,20 +35,12 @@ import argparse
 import json
 import statistics as st
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from ..config import ROOT
 
 RECORD_PATH = ROOT / "data" / "forward_record.jsonl"
 
-# Capital-scaling gates. Deliberately demanding: the cost of a false positive is
-# real money on an unvalidated strategy, and the cost of waiting is only time.
-GATES = [
-    (0, "NO DATA", "Record signals. Do not size anything off this."),
-    (30, "MEASURED", "Enough to see a direction. Still paper only."),
-    (100, "EVIDENCED", "If edge > 0 vs hold, a small live sleeve is defensible."),
-    (250, "ESTABLISHED", "Sustained edge across regimes — scale deliberately."),
-]
 
 
 @dataclass
@@ -74,36 +74,54 @@ class ConfidenceReport:
     scored: list[ScoredSignal] = field(default_factory=list)
     pending: int = 0
     rows: int = 0
+    excluded: int = 0          # rows recorded before `since` (not evidence)
+    since: str | None = None
 
     @property
     def n(self) -> int:
         return len(self.scored)
 
-    def gate(self) -> tuple[str, str]:
-        level, label, advice = GATES[0][0], GATES[0][1], GATES[0][2]
-        for threshold, lab, adv in GATES:
-            if self.n >= threshold:
-                level, label, advice = threshold, lab, adv
-        return label, advice
+    def t_stat(self) -> float | None:
+        """Significance of the mean signed return, counted in DAYS, not signals.
+
+        Signals on the same day share one market move, so they are averaged into
+        one observation per day first. Consecutive days' 5-session windows
+        overlap, which inflates a naive t by roughly sqrt(horizon); dividing by
+        that is a conservative stand-in for a Newey-West correction.
+        """
+        by_day: dict[str, list[float]] = {}
+        for s in self.scored:
+            by_day.setdefault(s.date, []).append(s.signed_return)
+        daily = [st.mean(v) for v in by_day.values()]
+        if len(daily) < 3:
+            return None
+        sd = st.stdev(daily)
+        if sd == 0:
+            return None
+        return st.mean(daily) / (sd / len(daily) ** 0.5) / max(self.horizon, 1) ** 0.5
 
     def summary(self) -> dict:
+        base = {"horizon": self.horizon, "n": self.n, "rows": self.rows,
+                "pending": self.pending, "excluded": self.excluded, "since": self.since}
         if not self.scored:
-            label, advice = self.gate()
-            return {"horizon": self.horizon, "n": 0, "rows": self.rows,
-                    "pending": self.pending, "gate": label, "advice": advice}
+            return {**base, "days": 0}
         hits = [s for s in self.scored if s.directional_hit]
         signed = [s.signed_return for s in self.scored]
         # benchmark: hold the same names over the same windows
         hold = [s.ret_pct for s in self.scored]
-        label, advice = self.gate()
+        days = sorted({s.date for s in self.scored})
+        t = self.t_stat()
         return {
-            "horizon": self.horizon, "n": self.n, "rows": self.rows, "pending": self.pending,
+            **base,
+            "days": len(days), "first_date": days[0], "last_date": days[-1],
+            "span_days": (datetime.fromisoformat(days[-1])
+                          - datetime.fromisoformat(days[0])).days,
             "hit_rate_pct": round(100 * len(hits) / self.n, 1),
             "mean_signal_return_pct": round(st.mean(signed), 3),
             "median_signal_return_pct": round(st.median(signed), 3),
             "mean_buyhold_return_pct": round(st.mean(hold), 3),
             "edge_vs_hold_pp": round(st.mean(signed) - st.mean(hold), 3),
-            "gate": label, "advice": advice,
+            "t_stat": None if t is None else round(t, 2),
         }
 
 
@@ -120,14 +138,23 @@ def _load_rows() -> list[dict]:
     return rows
 
 
-def score_forward(horizon_days: int = 5, min_abs_score: float = 0.2) -> ConfidenceReport:
-    """Grade recorded convictions whose horizon has fully elapsed."""
+def score_forward(horizon_days: int = 5, min_abs_score: float = 0.2,
+                  since: str | None = None) -> ConfidenceReport:
+    """Grade recorded convictions whose horizon has fully elapsed.
+
+    `since` (YYYY-MM-DD) drops rows recorded before it: evidence produced by a
+    different strategy, or on broken data, is not evidence for this one.
+    """
     import warnings
     warnings.filterwarnings("ignore")
     import yfinance as yf
 
     rows = _load_rows()
-    rep = ConfidenceReport(horizon=horizon_days, rows=len(rows))
+    rep = ConfidenceReport(horizon=horizon_days, rows=len(rows), since=since)
+    if since:
+        kept = [r for r in rows if str(r.get("recorded_at_et", ""))[:10] >= since]
+        rep.excluded = len(rows) - len(kept)
+        rows = kept
     if not rows:
         return rep
 
@@ -140,34 +167,34 @@ def score_forward(horizon_days: int = 5, min_abs_score: float = 0.2) -> Confiden
     if hasattr(px, "to_frame") and len(symbols) == 1:
         px = px.to_frame(symbols[0])
 
-    now = datetime.now()
+    seen: set[tuple[str, str]] = set()
+    rows = sorted(rows, key=lambda r: str(r.get("recorded_at_et", "")))
     for r in rows:
         try:
             # timestamps carry an offset (e.g. -04:00); compare naively in ET
             rec_dt = datetime.fromisoformat(r["recorded_at_et"]).replace(tzinfo=None)
         except Exception:
             continue
-        # rule 1: don't score a signal before its horizon has actually elapsed
-        if (now - rec_dt).days < horizon_days:
-            rep.pending += sum(1 for c in r.get("convictions", [])
-                               if abs(c.get("score", 0)) >= min_abs_score)
-            continue
+        day = rec_dt.strftime("%Y-%m-%d")
 
         for c in r.get("convictions", []):
             sym, score = c["symbol"], float(c.get("score", 0))
-            if abs(score) < min_abs_score or sym not in px.columns:
+            if abs(score) < min_abs_score or (sym, day) in seen:
+                continue
+            seen.add((sym, day))            # rule 3: first qualifying call of the day
+            if sym not in px.columns:
                 continue
             s = px[sym].dropna()
-            after = s[s.index >= rec_dt.strftime("%Y-%m-%d")]
-            if len(after) < 2:
-                continue
-            window = after[after.index <= (rec_dt + timedelta(days=horizon_days)).strftime("%Y-%m-%d")]
-            if len(window) < 2:
+            after = s[s.index >= day]
+            # rules 1 + 4: entry is that day's close, exit `horizon` SESSIONS
+            # later. Until that session has closed the signal is pending.
+            if len(after) < horizon_days + 1:
+                rep.pending += 1
                 continue
             rep.scored.append(ScoredSignal(
-                date=rec_dt.strftime("%Y-%m-%d"), symbol=sym, score=score,
-                action=c.get("action", ""), entry=float(window.iloc[0]),
-                exit=float(window.iloc[-1]), horizon_days=horizon_days))
+                date=day, symbol=sym, score=score,
+                action=c.get("action", ""), entry=float(after.iloc[0]),
+                exit=float(after.iloc[horizon_days]), horizon_days=horizon_days))
     return rep
 
 
@@ -177,9 +204,10 @@ def _main() -> None:
     ap.add_argument("--min-score", type=float, default=0.2,
                      help="only grade signals that crossed the entry threshold")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--since", default=None, help="ignore rows recorded before YYYY-MM-DD")
     args = ap.parse_args()
 
-    rep = score_forward(args.horizon, args.min_score)
+    rep = score_forward(args.horizon, args.min_score, since=args.since)
     s = rep.summary()
     if args.json:
         print(json.dumps(s, indent=2))
@@ -188,11 +216,11 @@ def _main() -> None:
     print("=" * 64)
     print("CONFIDENCE TRACKER — forward, out-of-sample")
     print("=" * 64)
-    print(f"record rows        : {s['rows']}")
-    print(f"signals scored     : {s['n']}   (horizon {args.horizon}d)")
+    print(f"record rows        : {s['rows']}  (excluded before {s['since']}: {s['excluded']})")
+    print(f"signals scored     : {s['n']} over {s['days']} trading day(s)  "
+          f"(one per name per day, horizon {args.horizon} sessions)")
     print(f"awaiting horizon   : {s['pending']}")
-    print(f"gate               : {s['gate']}")
-    print(f"  -> {s['advice']}")
+    print("capital gate       : python -m app.analytics.sleeve")
     if not s["n"]:
         print("\nNothing gradable yet. Run the live loop through market hours and")
         print("re-check once signals are older than the horizon.")
@@ -202,13 +230,7 @@ def _main() -> None:
     print(f"mean signal return        : {s['mean_signal_return_pct']:+.3f}%")
     print(f"mean buy-and-hold return  : {s['mean_buyhold_return_pct']:+.3f}%")
     print(f"EDGE vs holding           : {s['edge_vs_hold_pp']:+.3f} pp")
-    print()
-    if s["edge_vs_hold_pp"] <= 0:
-        print("No edge over doing nothing. Do not scale capital on this.")
-    elif s["n"] < 100:
-        print("Positive so far, but under 100 signals this is not yet evidence.")
-    else:
-        print("Positive edge on a meaningful sample — scaling is defensible.")
+    print(f"t-stat (by day, overlap-adjusted): {s['t_stat']}")
 
 
 if __name__ == "__main__":
