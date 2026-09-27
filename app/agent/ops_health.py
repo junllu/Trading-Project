@@ -125,6 +125,15 @@ def _mcp_pulls(day: date) -> tuple[bool, str]:
     return p.exists(), f"brief for {day}" + ("" if p.exists() else " missing")
 
 
+def _paper_close(day: date) -> tuple[bool, str]:
+    try:
+        s = json.loads((DATA / "paper" / "rev1" / "state.json").read_text("utf-8"))
+    except (OSError, ValueError):
+        return False, "rev1 paper state missing"
+    last = s.get("last_close_run") or ""
+    return last >= day.isoformat(), f"rev1 close last ran for {last or 'never'}"
+
+
 # Due times are LOCAL (the scheduled tasks' clock), each with slack after the
 # task's own start so a slow run is not a false alarm.
 JOBS: list[tuple[str, str, time, Callable[[date], tuple[bool, str]]]] = [
@@ -133,6 +142,7 @@ JOBS: list[tuple[str, str, time, Callable[[date], tuple[bool, str]]]] = [
     ("forward_record", "TradingPortal-ForwardRecord", time(13, 0),  _forward_record),
     ("minute_harvest", "TradingPortal-MinuteHarvest", time(13, 45), _minute_harvest),
     ("daily_bars",     "TradingPortal-DailyBars",     time(14, 30), _daily_bars),
+    ("paper_close",    "TradingPortal-PaperClose",    time(14, 40), _paper_close),
 ]
 
 
