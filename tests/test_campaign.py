@@ -84,3 +84,16 @@ def test_pace_is_not_on_track_by_construction():
     c = cm.Campaign(start_capital=100_000, started="2026-09-05", deadline="2027-12-31")
     st = c.status(100_000, now=date(2026, 12, 1))
     assert st.pace == "behind"
+
+
+def test_deposit_is_not_performance_and_withdrawal_is_not_a_loss():
+    from app.campaign import campaign as cm
+    c = cm.Campaign(start_capital=100_000, high_water_mark=100_000,
+                    contributions=[{"date": "2026-10-01", "amount": 20_000}])
+    st = c.status(120_000)                     # the whole rise is the deposit
+    assert st.performance_equity == 100_000 and st.drawdown == 0
+    assert st.progress == 0.12                 # but it still counts toward $1M
+
+    w = cm.Campaign(start_capital=100_000, high_water_mark=100_000,
+                    contributions=[{"date": "2026-10-01", "amount": -30_000}])
+    assert not w.status(70_000).breached       # withdrew 30%, lost nothing

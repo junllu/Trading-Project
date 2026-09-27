@@ -264,8 +264,9 @@ class Portal:
             trailing_drawdown_halt=float(camp_cfg.get("trailing_drawdown_halt", 0.20)),
             high_water_mark=float(state.get("high_water_mark") or 0.0),
             state_path=campaign_mod.STATE_PATH,
+            contributions=list(state.get("contributions") or []),
         )
-        self.campaign.update_hwm(book)
+        self.campaign.update_hwm(book - self.campaign.net_contributions())
         if not state:
             self.campaign.save_state()
         return self

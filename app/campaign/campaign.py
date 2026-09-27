@@ -69,6 +69,8 @@ class CampaignStatus:
     phase: str                       # "accumulate" | "de-risk" | "exit"
     focus_symbols: list[str] = field(default_factory=list)
     note: str = ""
+    net_contributions: float = 0.0   # deposits - withdrawals since the start
+    performance_equity: float = 0.0  # equity - net_contributions: what drawdown/pace judge
 
     def to_dict(self) -> dict:
         def _f(x: float, nd: int) -> float:
@@ -94,6 +96,8 @@ class CampaignStatus:
             "phase": self.phase,
             "focus_symbols": self.focus_symbols,
             "note": self.note,
+            "net_contributions": round(self.net_contributions, 2),
+            "performance_equity": _f(self.performance_equity, 2),
         }
 
 
@@ -109,6 +113,14 @@ class Campaign:
     derisk_floor: float = 0.2                    # risk budget floor at the deadline
     high_water_mark: float = 0.0
     state_path: Optional[Path] = None            # persist start + HWM across restarts
+    # Deposits (+) and withdrawals (-) since `started`: [{date, amount, note}].
+    # Without these a deposit reads as performance and a withdrawal as a loss —
+    # a large enough withdrawal would trip the drawdown halt on no loss at all.
+    contributions: list[dict] = field(default_factory=list)
+
+    def net_contributions(self) -> float:
+        return sum(float(c.get("amount") or 0.0) for c in self.contributions
+                   if str(c.get("date", "")) >= self.started)
 
     # --- high-water mark / drawdown ---------------------------------------
     def update_hwm(self, equity: float) -> None:
@@ -121,6 +133,7 @@ class Campaign:
             return
         prev = load_state(self.state_path)
         prev.update({"start_capital": round(self.start_capital, 2), "started": self.started,
+                     "contributions": self.contributions,
                      "high_water_mark": round(self.high_water_mark, 2),
                      "hwm_as_of": time.strftime("%Y-%m-%d %H:%M:%S")})
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -190,10 +203,14 @@ class Campaign:
 
     # --- rollup ------------------------------------------------------------
     def status(self, equity: float, now: date | None = None) -> CampaignStatus:
-        self.update_hwm(equity)
-        dd = self.drawdown(equity)
+        # Progress toward the target counts every dollar; drawdown and pace
+        # judge PERFORMANCE, so they see equity net of money added or removed.
+        flows = self.net_contributions()
+        perf = equity - flows
+        self.update_hwm(perf)
+        dd = self.drawdown(perf)
         breached = dd >= self.trailing_drawdown_halt
-        pr = self.pace_ratio(equity, now)
+        pr = self.pace_ratio(perf, now)
         pace = "ahead" if pr >= 1.1 else "behind" if pr <= 0.9 else "on_track"
         st = CampaignStatus(
             equity=equity, target=self.target,
@@ -207,6 +224,7 @@ class Campaign:
             pace_ratio=pr, pace=pace,
             derisk_factor=self.derisk_factor(now), phase=self.phase(now),
             focus_symbols=list(self.focus_symbols),
+            net_contributions=flows, performance_equity=perf,
         )
         st.note = self._note(st)
         return st

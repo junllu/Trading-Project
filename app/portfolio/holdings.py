@@ -61,14 +61,16 @@ def load_cash(path: Path | None = None) -> float | None:
 
 def load_other_value(path: Path | None = None) -> float:
     """Broker-marked value that is not a share line: `options_value` (short
-    premium is negative) + `crypto_value`. Without it the book overstates a
+    premium is negative) + `crypto_value` + `pending_deposits` (your money, in
+    transit; record the same deposit as a campaign contribution). Without it the book overstates a
     short-options account by exactly the buyback cost of those options."""
     p = path or HOLDINGS_PATH
     if yaml is None or not p.exists():
         return 0.0
     with p.open("r", encoding="utf-8") as fh:
         data = yaml.safe_load(fh) or {}
-    return sum(float(data.get(k) or 0.0) for k in ("options_value", "crypto_value"))
+    return sum(float(data.get(k) or 0.0)
+               for k in ("options_value", "crypto_value", "pending_deposits"))
 
 
 def seed_paper_broker(broker: PaperBroker, holdings: list[dict]) -> list[str]:
