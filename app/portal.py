@@ -239,22 +239,59 @@ class Portal:
 
         # Campaign: the mission (grow existing capital to a target by a deadline).
         camp_cfg = self.settings.raw.get("campaign", {}) or {}
+        # The campaign values the REAL book, so every real holding needs a real
+        # price — including when the simulator was restored above, which skips
+        # the seeding loop and would leave _book_value on holdings.yaml's
+        # snapshot prices.
+        from .portfolio.holdings import is_untradeable as _untradeable
+        for h in load_holdings():
+            sym = str(h["symbol"]).upper()
+            if self.market.last(sym) is None and not _untradeable(sym):
+                self.market.load_real_history(sym)
+
         book = self._book_value()
+        # Start capital: config, else the persisted value, else today's book
+        # (then persisted, so it is fixed from here on — never re-anchored).
+        from .campaign import campaign as campaign_mod
+        state = campaign_mod.load_state(campaign_mod.STATE_PATH)
         self.campaign = Campaign(
-            start_capital=float(camp_cfg.get("start_capital") or book or 100_000),
+            start_capital=float(camp_cfg.get("start_capital")
+                                or state.get("start_capital") or book or 100_000),
             target=float(camp_cfg.get("target", 1_000_000)),
             started=camp_cfg.get("started", time.strftime("%Y-%m-%d")),
             deadline=camp_cfg.get("deadline", "2027-12-31"),
             focus_symbols=[s.upper() for s in camp_cfg.get("focus_symbols", ["MRVL", "NVDA", "TSLA"])],
             trailing_drawdown_halt=float(camp_cfg.get("trailing_drawdown_halt", 0.20)),
+            high_water_mark=float(state.get("high_water_mark") or 0.0),
+            state_path=campaign_mod.STATE_PATH,
         )
         self.campaign.update_hwm(book)
+        if not state:
+            self.campaign.save_state()
         return self
 
     def _book_value(self) -> float:
-        """Real account value the campaign tracks = positions market value +
-        real uninvested cash. When holdings are loaded, paper.cash is set to the
-        real cash (0 if unknown), so this is the true total — no phantom money."""
+        """Real account value the campaign tracks = REAL holdings at current
+        prices + real uninvested cash.
+
+        Read from holdings.yaml, not from the paper broker. Once the simulated
+        account started persisting (sim_account.json), the paper broker held the
+        SIMULATOR's positions and cash — so the campaign, and its 20% drawdown
+        halt, were guarding a simulation ($156,741) while the real book stood at
+        $136,544. The paper value below is only the fallback with no holdings.
+        """
+        holdings = load_holdings()
+        if holdings:
+            total = float(load_cash() or 0.0)
+            for h in holdings:
+                sym = str(h["symbol"]).upper()
+                q = self.market.last(sym)
+                if q is not None and self.market.is_real(sym):
+                    px = q.price
+                else:
+                    px = float(h.get("last") or h.get("avg_price") or 0.0)
+                total += float(h.get("shares") or 0.0) * px
+            return total
         paper = self.brokers.get("paper")
         if paper is None:
             return 0.0

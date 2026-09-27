@@ -27,3 +27,11 @@ def _isolate_position_plans(tmp_path, monkeypatch):
     """
     from app.agent import position_plans
     monkeypatch.setattr(position_plans, "PATH", tmp_path / "position_plans.json")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_campaign_state(tmp_path, monkeypatch):
+    """Campaign start capital and high-water mark persist to disk; a test that
+    builds a Portal must not rewrite the real campaign's peak."""
+    from app.campaign import campaign
+    monkeypatch.setattr(campaign, "STATE_PATH", tmp_path / "campaign_state.json")

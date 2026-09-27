@@ -61,3 +61,26 @@ def test_focus_symbols_default():
     c = make(focus_symbols=["MRVL", "NVDA", "TSLA"])
     st = c.status(131000, date(2026, 9, 5))
     assert st.focus_symbols == ["MRVL", "NVDA", "TSLA"]
+
+
+def test_hwm_survives_a_restart(tmp_path):
+    """A drawdown that spans a restart must still trip the halt."""
+    from app.campaign import campaign as cm
+    path = tmp_path / "state.json"
+    a = cm.Campaign(start_capital=100_000, state_path=path)
+    a.update_hwm(150_000)
+    state = cm.load_state(path)
+    b = cm.Campaign(start_capital=state["start_capital"],
+                    high_water_mark=state["high_water_mark"], state_path=path)
+    b.update_hwm(110_000)                      # restart at a lower value
+    assert b.high_water_mark == 150_000
+    assert b.breached(110_000)                 # 26.7% below the persisted peak
+
+
+def test_pace_is_not_on_track_by_construction():
+    """Anchored at the true start, a flat book three weeks in is behind."""
+    from datetime import date
+    from app.campaign import campaign as cm
+    c = cm.Campaign(start_capital=100_000, started="2026-09-05", deadline="2027-12-31")
+    st = c.status(100_000, now=date(2026, 12, 1))
+    assert st.pace == "behind"

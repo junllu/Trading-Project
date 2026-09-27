@@ -20,10 +20,30 @@ best survivable shot at it.
 """
 from __future__ import annotations
 
+import json
 import math
 import time
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from pathlib import Path
+from typing import Optional
+
+from ..config import ROOT
+
+# Start capital and high-water mark MUST outlive the process. Both used to be
+# rebuilt on every launch: start_capital defaulted to that moment's book, so the
+# glide path re-anchored to "now" and pace read on_track by construction (it
+# said on_track while 386%/yr was required); and the HWM restarted at the
+# current value, so a drawdown spanning a restart could never trip the halt.
+STATE_PATH = ROOT / "data" / "campaign_state.json"
+
+
+def load_state(path: Path | None = None) -> dict:
+    p = path or STATE_PATH
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
 
 
 def _parse_date(s: str) -> date:
@@ -88,11 +108,25 @@ class Campaign:
     derisk_window_days: int = 210                # start scaling out ~7 months before deadline
     derisk_floor: float = 0.2                    # risk budget floor at the deadline
     high_water_mark: float = 0.0
+    state_path: Optional[Path] = None            # persist start + HWM across restarts
 
     # --- high-water mark / drawdown ---------------------------------------
     def update_hwm(self, equity: float) -> None:
         if equity > self.high_water_mark:
             self.high_water_mark = equity
+            self.save_state()
+
+    def save_state(self) -> None:
+        if self.state_path is None:
+            return
+        prev = load_state(self.state_path)
+        prev.update({"start_capital": round(self.start_capital, 2), "started": self.started,
+                     "high_water_mark": round(self.high_water_mark, 2),
+                     "hwm_as_of": time.strftime("%Y-%m-%d %H:%M:%S")})
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.state_path.with_name(self.state_path.name + ".tmp")
+        tmp.write_text(json.dumps(prev, indent=2), encoding="utf-8")
+        tmp.replace(self.state_path)
 
     def drawdown(self, equity: float) -> float:
         if self.high_water_mark <= 0:
