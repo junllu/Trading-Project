@@ -69,8 +69,15 @@ def _autostart_paper_loop(log) -> None:
             settings.mode.value, live or "none")
         return
 
-    portal.start_loop()
-    if portal.scheduler is not None:
+    # The old conviction cycle and rule-strategy loop were retired 2026-09-27;
+    # the paper tracks (app/paper/*) run as scheduled tasks instead. Both
+    # switches default on so older configs behave as before.
+    auto = settings.raw.get("autonomy") or {}
+    if auto.get("loop_autostart", True):
+        portal.start_loop()
+    else:
+        log.info("strategy loop autostart off (autonomy.loop_autostart: false)")
+    if portal.scheduler is not None and auto.get("schedule_autostart", True):
         try:
             portal.start_schedule()
         except Exception:
