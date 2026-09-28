@@ -46,11 +46,10 @@ def _state() -> dict:
 
 
 def gate(now: datetime | None = None) -> str:
-    now = now or datetime.now()
-    s = _state()
-    if now.hour == DAILY_HOUR or not s["expiries"] or now.date().isoformat() in s["expiries"]:
-        return "RUN"
-    return "SKIP"
+    """Every hourly run checks prices (user, 2026-09-28: don't skip the price
+    checks). Alerts still fire at most once per day per position, so running
+    hourly adds vigilance, not noise."""
+    return "RUN"
 
 
 def _label(p: dict) -> str:
