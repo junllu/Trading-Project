@@ -180,6 +180,26 @@ def _pick(contracts: list[dict], sym: str, kind: str, today: date, min_strike: f
     return min(ok, key=lambda c: abs(abs(float(c["delta"])) - DELTA_TGT)) if ok else None
 
 
+def why_not(contracts: list[dict], sym: str, kind: str, today: date) -> str:
+    """The first rule that eliminated this symbol's candidates, for the log."""
+    mine = [c for c in contracts if c["symbol"] == sym and c["type"] == kind]
+    if not mine:
+        return "no contracts quoted"
+    stages = [
+        ("expiry not 30-45 days", lambda c: DTE_MIN <= dte(c["expiration"], today) <= DTE_MAX),
+        (f"bid < ${MIN_BID:.2f}", lambda c: float(c.get("bid") or 0) >= MIN_BID),
+        (f"spread > {MAX_SPREAD:.0%}", lambda c: (float(c["ask"]) - float(c["bid"]))
+         / ((float(c["ask"]) + float(c["bid"])) / 2) <= MAX_SPREAD),
+        (f"|delta| outside {DELTA_LO}-{DELTA_HI}",
+         lambda c: DELTA_LO <= abs(float(c.get("delta") or 0)) <= DELTA_HI),
+    ]
+    for reason, ok in stages:
+        mine = [c for c in mine if ok(c)]
+        if not mine:
+            return reason
+    return "strike below the minimum"
+
+
 def step(quotes: dict, today: date | None = None) -> dict:
     today = today or date.today()
     D = today.isoformat()
@@ -272,7 +292,8 @@ def step(quotes: dict, today: date | None = None) -> dict:
             continue
         c = _pick(contracts, sym, "put", today)
         if not c:
-            events.append({"event": "no_qualifying_put", "symbol": sym})
+            events.append({"event": "no_qualifying_put", "symbol": sym,
+                           "why": why_not(contracts, sym, "put", today)})
             continue
         if earnings.get(sym) and earnings[sym] <= c["expiration"]:
             events.append({"event": "skip_earnings", "symbol": sym, "earnings": earnings[sym]})
