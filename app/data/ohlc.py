@@ -104,7 +104,7 @@ LIQUID_VOLATILE = [
     "VRT", "ANET", "ALAB", "ARM", "SMCI", "DELL",
 ]
 
-UNTRADEABLE = {"NEWYY", "EA", "SQ"}   # delisted / taken private / renamed; kept out so coverage math stays honest
+UNTRADEABLE = {"NEWYY", "EA", "SQ", "AVB", "EQR", "LEG"}   # delisted / taken private / renamed / stopped trading 2026-08; history kept for backtests, excluded from refresh + freshness
 
 
 def universe(include_held: bool = True) -> list[str]:
