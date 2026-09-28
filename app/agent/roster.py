@@ -89,6 +89,7 @@ class Agent:
     level: int = PREPARE
     stages: list[str] = field(default_factory=list)   # irreversible acts it may STAGE
     note: str = ""
+    retired: str = ""                # non-empty = the orchestrator no longer runs it (why)
 
     def to_dict(self) -> dict:
         return dict(self.__dict__) | {"level_name": LEVELS[self.level][0]}
@@ -312,7 +313,7 @@ ROSTER: list[Agent] = [
     Agent(
         name="chief", cadence_class="dual", signal_kind="route", kind=COORDINATOR, leg=SHARED,
         owns="one reviewed brief, with every irreversible step staged and named",
-        consumes=["thesis_ledger", "options_desk", "trials_auditor",
+        consumes=["thesis_ledger", "trials_auditor", "track_gate", "ops_health", "watch",
                   "calibration_scorer", "autonomy_auditor", "onboarding_gate", "researcher"],
         produces="the decision queue",
         cadence="daily pre-open; full review quarterly on filings",
@@ -351,6 +352,20 @@ ROSTER: list[Agent] = [
               "cannot be promoted to run unattended."),
     ),
 ]
+
+
+# Retired 2026-09-27 with the conviction blend they served. Kept in the graph
+# (code, tests and history intact) but the orchestrator no longer runs them and
+# the program manager does not count them as outstanding work.
+RETIRED = {
+    "live_recorder": "recorded the retired conviction blend; paper tracks (app/paper) replace it",
+    "calibration_scorer": "calibrated conviction scores that no longer drive anything",
+    "exit_auditor": "audited the old flat exit thresholds; rev1 exits are pre-registered",
+    "options_desk": "superseded by wheel1 (paper) and the user's watch list (app/paper/watch)",
+}
+for _a in ROSTER:
+    if _a.name in RETIRED:
+        _a.retired = RETIRED[_a.name]
 
 BY_NAME = {a.name: a for a in ROSTER}
 

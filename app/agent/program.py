@@ -103,7 +103,7 @@ def _delivery() -> dict:
     from .roster import COORDINATOR, ROSTER
     unwired, missing_module = [], []
     for a in ROSTER:
-        if a.kind == COORDINATOR:
+        if a.kind == COORDINATOR or a.retired:
             continue
         if not a.module:
             missing_module.append(a.name)
@@ -119,24 +119,19 @@ def _delivery() -> dict:
 
 
 def _evidence_debt() -> dict:
-    """Out-of-sample evidence the program claims to have but does not.
+    """Forward evidence per paper track, from the capital gate (track_gate).
 
-    forward_record.jsonl is the only record that cannot be tuned after the
-    fact. If it is thin, every backtested claim in the system is unbacked by
-    anything the future has not already seen.
+    Since 2026-09-27 the only out-of-sample record that matters is each paper
+    track's forward ledger; the old forward_record.jsonl graded a retired blend.
     """
-    from ..config import ROOT
-    p = ROOT / "data" / "forward_record.jsonl"
-    rows = 0
-    if p.exists():
-        try:
-            rows = sum(1 for line in p.open("r", encoding="utf-8") if line.strip())
-        except Exception:
-            rows = 0
-    return {"forward_record_rows": rows,
-            "calibration_possible": rows >= 100,
-            "note": ("Calibration needs resolved outcomes. Below ~100 rows any "
-                     "Brier/ECE figure is describing noise.")}
+    from ..analytics.track_gate import MIN, evaluate
+    g = evaluate()
+    tracks = {t["track"]: {"days": t["days"], "need": MIN[t["track"]]["days"], "gate": t["gate"]}
+              for t in g["tracks"]}
+    lead = max(tracks.items(), key=lambda kv: kv[1]["days"] / kv[1]["need"])
+    return {"tracks": tracks, "fundable": g["best"], "live_usd": g["live_usd"],
+            "lead_track": lead[0], "lead_days": lead[1]["days"], "lead_need": lead[1]["need"],
+            "funding_review_possible": g["best"] is not None}
 
 
 def _blockers() -> list[dict]:
@@ -228,18 +223,18 @@ def decisions() -> list[Decision]:
             evidence=[Evidence("roster", "wired_pct", f"{d['wired_pct']}%", today)]))
 
     ev = _evidence_debt()
-    if not ev["calibration_possible"]:
+    if not ev["funding_review_possible"]:
         out.append(Decision(
-            id="program:evidence_debt", subject="forward record",
-            subject_type="subsystem", kind=DATA, urgency=THIS_WEEK,
-            claim=(f"only {ev['forward_record_rows']} forward-record rows exist — "
-                   f"no claim in the system has out-of-sample support yet"),
-            falsifier="forward_record.jsonl passes 100 rows with resolved outcomes",
+            id="program:evidence_debt", subject="paper tracks",
+            subject_type="subsystem", kind=DATA, urgency=THIS_QUARTER,
+            claim=(f"no paper track is fundable yet — furthest along is {ev['lead_track']} at "
+                   f"{ev['lead_days']}/{ev['lead_need']} sessions; the funding review waits on evidence"),
+            falsifier="any track's gate reaches FUND $1k (app.analytics.track_gate)",
             owner="program_manager",
-            action="run the live recorder through regular sessions to accumulate rows",
-            action_verb="research",
-            evidence=[Evidence("live_recorder", "rows",
-                               str(ev["forward_record_rows"]), today)]))
+            action="keep the paper tasks running; nothing to change",
+            action_verb="report",
+            evidence=[Evidence("track_gate", t, f"{v['days']}/{v['need']} {v['gate']}", today)
+                      for t, v in ev["tracks"].items()]))
 
     for b in _blockers():
         out.append(Decision(
@@ -299,8 +294,10 @@ def _main() -> None:
         print(f"            no module: {', '.join(d['no_module'])}")
 
     ev = r["evidence_debt"]
-    print(f"\n  EVIDENCE  {ev['forward_record_rows']} forward-record rows "
-          f"({'calibration possible' if ev['calibration_possible'] else 'too few to calibrate'})")
+    print(f"\n  EVIDENCE  paper tracks (sessions / needed, gate):")
+    for t, v in ev["tracks"].items():
+        print(f"            {t:<8} {v['days']:>3}/{v['need']:<3} {v['gate']}")
+    print(f"            fundable now: {ev['fundable'] or 'none'}")
 
     if r["blockers"]:
         print("\n  BLOCKED")

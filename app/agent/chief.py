@@ -267,8 +267,84 @@ def _from_program() -> list[Decision]:
     return [d for d in ds if d.id not in bad]
 
 
-COLLECTORS = (_from_statusboard, _from_thesis, _from_options_desk,
-              _from_researcher, _from_exit_discipline, _from_program)
+def _from_tracks() -> list[Decision]:
+    """Capital gate: a track that has earned live money is a decision for the user."""
+    from ..analytics.track_gate import evaluate
+    g, today, out = evaluate(), datetime.now().strftime("%Y-%m-%d"), []
+    for t in g["tracks"]:
+        if t["live_usd"]:
+            out.append(Decision(
+                id=f"gate:{t['track']}", subject=t["track"], subject_type="subsystem",
+                kind=OPPORTUNITY, urgency=THIS_WEEK,
+                claim=(f"{t['track']} earned {t['gate']} on forward paper evidence "
+                       f"({t['days']} sessions, t {t['t']})"),
+                falsifier="the track's average turns non-positive or t falls below 1.65",
+                owner="track_gate",
+                action=(f"fund the agentic account for {t['track']} (${t['live_usd']:,}) — "
+                        "one-share test order first; /code-review ultra before live"),
+                action_verb="transfer",
+                evidence=[Evidence("track_gate", "gate", t["gate"], today)]))
+    return out
+
+
+def _from_ops_health() -> list[Decision]:
+    """A job that did not produce its output is the first thing to fix."""
+    from ..config import ROOT
+    p = ROOT / "data" / "ops_health.json"
+    if not p.exists():
+        return []
+    h = json.loads(p.read_text("utf-8"))
+    out = []
+    for c in h.get("checks", []):
+        if not c.get("ok"):
+            out.append(Decision(
+                id=f"ops:{c['job']}", subject=c["job"], subject_type="subsystem",
+                kind=DATA, urgency=NOW,
+                claim=f"{c['job']} did not produce its output for {c['day']}: {c['detail']}",
+                falsifier=f"the next ops-health check passes {c['job']}",
+                owner="ops_health", action="investigate the task log and rerun it",
+                action_verb="research",
+                evidence=[Evidence("ops_health", "detail", c["detail"], h.get("checked_at", ""))]))
+    return out
+
+
+def _from_watch() -> list[Decision]:
+    """Today's qualified premium setups on the user's own names (advice only)."""
+    from ..config import ROOT
+    p = ROOT / "data" / "paper" / "watch" / "hits.jsonl"
+    if not p.exists():
+        return []
+    today = datetime.now().strftime("%Y-%m-%d")
+    rows = [json.loads(x) for x in p.read_text("utf-8").splitlines() if x.strip()]
+    hits = [h for r in rows if r.get("date") == today for h in r.get("hits", [])]
+    return [Decision(
+        id=f"watch:{h['symbol']}:{h['type']}:{h['strike']}", subject=h["symbol"], subject_type="symbol",
+        kind=OPPORTUNITY, urgency=NOW,
+        claim=(f"{h['symbol']} {h['type']} ${h['strike']:g} exp {h['expiration']} qualifies: "
+               f"bid ${h['bid']:.2f}, IV/RV {h['iv_rv']}"),
+        falsifier="implied volatility falls back below the wheel threshold before you act",
+        owner="watch", action="your call, in your own account (the core account is read-only to Claude)",
+        action_verb="place_order",
+        evidence=[Evidence("watch", "iv_rv", str(h["iv_rv"]), today)]) for h in hits]
+
+
+def _from_pending_approvals() -> list[Decision]:
+    """Standing items only the user can decide."""
+    today = datetime.now().strftime("%Y-%m-%d")
+    return [Decision(
+        id="gov:claude_md", subject="CLAUDE.md", subject_type="subsystem",
+        kind=GOVERNANCE, urgency=THIS_QUARTER,
+        claim=("CLAUDE.md still says 'make no mistake' and 'only focus_symbols for new BUYs'; "
+               "the user's 2026-09-27 decisions are 'average positive' and a broad universe"),
+        falsifier="CLAUDE.md is updated, or the user keeps the current wording",
+        owner="user_decisions", action="approve the drafted CLAUDE.md wording before the first live order",
+        action_verb="overwrite",
+        evidence=[Evidence("memory", "risk_philosophy", "2026-09-27", today)])]
+
+
+COLLECTORS = (_from_statusboard, _from_thesis, _from_researcher, _from_exit_discipline,
+              _from_program, _from_tracks, _from_ops_health, _from_watch,
+              _from_pending_approvals)
 
 
 def build_queue() -> dict:

@@ -105,6 +105,9 @@ def what_is_due(now: float | None = None) -> list[Due]:
     for a in ROSTER:
         last = state.get(a.name, {}).get("last_run")
 
+        if a.retired:
+            out.append(Due(a, False, f"retired: {a.retired}", last))
+            continue
         if a.cadence_class in PORTAL_OWNED:
             out.append(Due(a, False, "owned by the portal's live thread", last))
             continue
