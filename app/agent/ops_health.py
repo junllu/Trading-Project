@@ -131,7 +131,15 @@ def _paper_close(day: date) -> tuple[bool, str]:
     except (OSError, ValueError):
         return False, "rev1 paper state missing"
     last = s.get("last_close_run") or ""
-    return last >= day.isoformat(), f"rev1 close last ran for {last or 'never'}"
+    ok, detail = last >= day.isoformat(), f"rev1 close last ran for {last or 'never'}"
+    for t in ("trend1", "mom1"):
+        try:
+            m = json.loads((DATA / "paper" / t / "state.json").read_text("utf-8")).get("last_run") or ""
+        except (OSError, ValueError):
+            m = ""
+        if m < day.isoformat():
+            ok, detail = False, detail + f"; {t} last ran {m or 'never'}"
+    return ok, detail
 
 
 # Due times are LOCAL (the scheduled tasks' clock), each with slack after the

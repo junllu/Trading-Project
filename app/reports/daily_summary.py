@@ -97,7 +97,8 @@ def build() -> dict:
             "preview": preview.get("candidates_if_close_holds", [])[:15],
             "preview_as_of": preview.get("as_of_et"),
             "gate": {k: sleeve.get(k) for k in ("gate", "recommended_sleeve_usd", "missing")},
-            "wheel": _read(DATA / "paper" / "wheel1" / "scorecard.json", {}) or {}}
+            "wheel": _read(DATA / "paper" / "wheel1" / "scorecard.json", {}) or {},
+            "monthly": _read(DATA / "paper" / "monthly_scorecard.json", {}) or {}}
 
 
 def to_markdown(r: dict) -> str:
@@ -275,6 +276,17 @@ def to_html(r: dict) -> str:
         out.append(f'<section><h2>Likely next signals</h2><div class="chips">{pv}</div>'
                    f'<p class="note">Below their levels as of {e(str(r["preview_as_of"]))} ET — '
                    'only a close below confirms.</p></section>')
+
+    mo = r.get("monthly") or {}
+    if mo:
+        figs = ""
+        label = {"trend1": "trend1 · QQQ or T-bills", "mom1": "mom1 · S&P momentum top 10"}
+        for t, v in mo.items():
+            rel = v["equity"] / v["spy_equiv"] - 1 if v.get("spy_equiv") else 0.0
+            figs += (f'<div class="fig"><span>{e(label.get(t, t))}</span><b>${v["equity"]:,.0f}</b>'
+                     f'<small>vs SPY same $: {_pct(100 * rel)} · {e(", ".join(v["holdings"]))}</small></div>')
+        out.append(f'<section><h2>Monthly tracks · $100k paper each</h2><div class="figs">{figs}</div>'
+                   '<p class="note">Decide on month-end closes; marked daily.</p></section>')
 
     wh = r.get("wheel") or {}
     if wh.get("start"):

@@ -19,6 +19,12 @@ try {
   $code = $LASTEXITCODE
   $out | ForEach-Object { "$_" } | Add-Content $log
   "=== exit $code ===" | Add-Content $log
+  if ($Job -eq "close") {
+    # Monthly tracks (trend1, mom1) mark daily and decide on month-end closes.
+    $m = & (Join-Path $repo ".venv\Scripts\python.exe") -m app.paper.monthly 2>&1
+    $m | ForEach-Object { "$_" } | Add-Content $log
+    "=== monthly exit $LASTEXITCODE ===" | Add-Content $log
+  }
   exit $code
 } catch {
   "FAILED: $($_.Exception.Message)" | Add-Content $log
