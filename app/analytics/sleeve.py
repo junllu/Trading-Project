@@ -203,6 +203,33 @@ def evaluate_from_summary(
 
 def evaluate_sleeve(horizon_days: int = 5, min_abs_score: float = 0.2,
                     since: str | None = EVIDENCE_START) -> SleeveStatus:
+    """The live-capital gate, graded per strategy TRACK (app/analytics/track_gate).
+
+    Since 2026-09-27 the fundable strategies are the paper tracks (rev1, trend1,
+    mom1, wheel1). The retired conviction blend's forward record is still
+    available via `evaluate_legacy_forward_record` but no longer decides size.
+    """
+    from .track_gate import evaluate
+    g = evaluate()
+    best = next((t for t in g["tracks"] if t["track"] == g["best"]), None)
+    lines = [f"{t['track']}: {t['gate']}" + (f" ({'; '.join(t['missing'])})" if t["missing"] else "")
+             for t in g["tracks"]]
+    return SleeveStatus(
+        gate=best["gate"] if best else "COLLECTING", n=sum(t.get("trades", t["days"]) for t in g["tracks"]),
+        pending=0, horizon=horizon_days, hit_rate_pct=None, mean_signal_return_pct=None,
+        mean_buyhold_return_pct=None, edge_vs_hold_pp=None,
+        recommended_sleeve_usd=g["live_usd"], paper_shadow_usd=0,
+        release_stage_hint="live_confirm" if g["live_usd"] else "paper",
+        advice=(f"Fund {g['best']} (${g['live_usd']:,}). " if g["best"] else "No track fundable yet. ")
+               + " | ".join(lines),
+        as_of=time.strftime("%Y-%m-%d %H:%M:%S"),
+        days=max((t["days"] for t in g["tracks"]), default=0),
+        next_gate=None if g["live_usd"] >= 5000 else "FUND", missing=lines)
+
+
+def evaluate_legacy_forward_record(horizon_days: int = 5, min_abs_score: float = 0.2,
+                                   since: str | None = EVIDENCE_START) -> SleeveStatus:
+    """The old gate over the retired conviction blend's forward record."""
     rep: ConfidenceReport = score_forward(horizon_days, min_abs_score, since=since)
     # No sleeve equity curve exists yet, so drawdown is honestly unmeasured —
     # which blocks ESTABLISHED rather than silently skipping the check, as the

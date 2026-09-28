@@ -146,8 +146,7 @@ def _paper_close(day: date) -> tuple[bool, str]:
 # task's own start so a slow run is not a false alarm.
 JOBS: list[tuple[str, str, time, Callable[[date], tuple[bool, str]]]] = [
     ("mcp_pulls",      "TradingPortal-DailyMCPPulls", time(7, 0),   _mcp_pulls),
-    ("daily_cycle",    "TradingPortal-DailyCycle",    time(9, 45),  _daily_cycle),
-    ("forward_record", "TradingPortal-ForwardRecord", time(13, 0),  _forward_record),
+    # daily_cycle and forward_record retired 2026-09-27 with the old conviction blend.
     ("minute_harvest", "TradingPortal-MinuteHarvest", time(13, 45), _minute_harvest),
     ("daily_bars",     "TradingPortal-DailyBars",     time(14, 30), _daily_bars),
     ("paper_close",    "TradingPortal-PaperClose",    time(14, 40), _paper_close),
