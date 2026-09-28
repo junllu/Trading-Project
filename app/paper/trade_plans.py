@@ -1,4 +1,4 @@
-"""The user's own discretionary trade plans — alert-only, one-line messages.
+"""The user's own discretionary trade plans - alert-only, one-line messages.
 
     python -m app.paper.trade_plans check PLAN_ID SPOT BID ASK HELD [AVG_COST]
 
