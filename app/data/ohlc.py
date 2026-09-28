@@ -165,7 +165,14 @@ def fetch(symbol: str, start: str = "2018-01-01") -> tuple[bool, str]:
         with path_for(symbol).open("w", encoding="utf-8", newline="") as fh:
             w = csv.writer(fh)
             w.writerow(["date", "open", "high", "low", "close", "volume"])
+            # Never store a session that has not closed: a mid-day "close" read
+            # later as final is a price that never existed (refresh.py applies
+            # the same cutoff; this path lacked it until 2026-09-28).
+            from .refresh import last_complete_session
+            cutoff = last_complete_session().isoformat()
             for idx, r in df.iterrows():
+                if idx.strftime("%Y-%m-%d") > cutoff:
+                    continue
                 try:
                     o, h, lo, c = (float(r["Open"]), float(r["High"]),
                                    float(r["Low"]), float(r["Close"]))

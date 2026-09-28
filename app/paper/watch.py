@@ -83,6 +83,22 @@ def evaluate(quotes: dict, today: date | None = None) -> list[dict]:
                          "spot": spots.get(s), "per_contract": round(100 * bid, 2),
                          "contracts": row["contracts_covered"] if kind == "call" else 1,
                          "collateral": round(100 * k, 2) if kind == "put" else None})
+    try:                                           # data point: keep today's IVs
+        from ..data.iv_history import record as _iv
+        _iv(quotes, "watch", {r["symbol"]: r["rv20"] for r in p["symbols"]}, today)
+    except Exception:
+        pass
+    # Apply the index finding where it helps: a market-wide fear spike is when
+    # sold premium historically paid best (docs/prereg/2026-09-28-vix-spike-putwrite.md).
+    try:
+        from .vix1 import signal_state
+        spike = signal_state()["on"]
+    except Exception:
+        spike = False
+    for h in hits:
+        h["vix_spike"] = spike
+        h["msg"] = (f"WATCH: {h['symbol']} {h['type']} ${h['strike']:g} exp {h['expiration'][5:]} "
+                    f"bid ${h['bid']:.2f} (IV/RV {h['iv_rv']})" + (" +VIX spike" if spike else ""))
     DIR.mkdir(parents=True, exist_ok=True)
     with (DIR / "hits.jsonl").open("a", encoding="utf-8") as fh:
         fh.write(json.dumps({"date": today.isoformat(), "hits": hits}) + "\n")

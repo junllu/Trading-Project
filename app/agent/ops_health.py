@@ -132,7 +132,7 @@ def _paper_close(day: date) -> tuple[bool, str]:
         return False, "rev1 paper state missing"
     last = s.get("last_close_run") or ""
     ok, detail = last >= day.isoformat(), f"rev1 close last ran for {last or 'never'}"
-    for t in ("trend1", "mom1"):
+    for t in ("trend1", "mom1", "vix1"):
         try:
             m = json.loads((DATA / "paper" / t / "state.json").read_text("utf-8")).get("last_run") or ""
         except (OSError, ValueError):

@@ -39,6 +39,14 @@ def _last_close(sym: str) -> float | None:
         return None
 
 
+def _jsonl_last(p: Path) -> dict | None:
+    try:
+        lines = [x for x in p.read_text("utf-8").splitlines() if x.strip()]
+        return json.loads(lines[-1]) if lines else None
+    except (OSError, ValueError):
+        return None
+
+
 def campaign() -> dict:
     """Real book at the latest cached close, judged like the portal does."""
     from ..campaign.campaign import Campaign, load_state
@@ -98,7 +106,9 @@ def build() -> dict:
             "preview_as_of": preview.get("as_of_et"),
             "gate": {k: sleeve.get(k) for k in ("gate", "recommended_sleeve_usd", "missing")},
             "wheel": _read(DATA / "paper" / "wheel1" / "scorecard.json", {}) or {},
-            "monthly": _read(DATA / "paper" / "monthly_scorecard.json", {}) or {}}
+            "monthly": _read(DATA / "paper" / "monthly_scorecard.json", {}) or {},
+            "vix1": _read(DATA / "paper" / "vix1" / "state.json", {}) or {},
+            "vix_signal": (_jsonl_last(DATA / "paper" / "vix1" / "signals.jsonl") or {})}
 
 
 def to_markdown(r: dict) -> str:
@@ -287,6 +297,18 @@ def to_html(r: dict) -> str:
                      f'<small>vs SPY same $: {_pct(100 * rel)} · {e(", ".join(v["holdings"]))}</small></div>')
         out.append(f'<section><h2>Monthly tracks · $100k paper each</h2><div class="figs">{figs}</div>'
                    '<p class="note">Decide on month-end closes; marked daily.</p></section>')
+
+    vs, vx = r.get("vix_signal") or {}, r.get("vix1") or {}
+    if vs:
+        state = "ON - premiums historically richest" if vs.get("on") else "off"
+        pos = vx.get("position")
+        out.append('<section><h2>Fear-spike signal · vix1</h2><div class="figs">'
+                   f'<div class="fig"><span>VIX spike</span><b>{e(state)}</b>'
+                   f'<small>VIX {vs.get("vix", 0):.1f} vs 20d {vs.get("vix_20d_avg")} '
+                   f'({vs.get("spike_ratio")}x, need 1.2) · fear {vs.get("fear_ratio")}x (need 1.5)</small></div>'
+                   f'<div class="fig"><span>vix1 paper</span><b>{"1 put open" if pos else "flat"}</b>'
+                   f'<small>{vx.get("trades", 0)} closed · equity ${vx.get("equity", 50000):,.0f}</small></div>'
+                   '</div></section>')
 
     wh = r.get("wheel") or {}
     if wh.get("start"):

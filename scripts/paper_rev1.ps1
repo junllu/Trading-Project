@@ -24,6 +24,9 @@ try {
     $m = & (Join-Path $repo ".venv\Scripts\python.exe") -m app.paper.monthly 2>&1
     $m | ForEach-Object { "$_" } | Add-Content $log
     "=== monthly exit $LASTEXITCODE ===" | Add-Content $log
+    $v = & (Join-Path $repo ".venv\Scripts\python.exe") -m app.paper.vix1 2>&1
+    $v | ForEach-Object { "$_" } | Add-Content $log
+    "=== vix1 exit $LASTEXITCODE ===" | Add-Content $log
   }
   exit $code
 } catch {

@@ -315,6 +315,13 @@ def step(quotes: dict, today: date | None = None) -> dict:
                        "expiration": c["expiration"], "credit": float(c["bid"]),
                        "delta": float(c["delta"]), "iv_rv": round(float(c["iv"]) / v, 2)})
 
+    try:                                           # keep the IVs we fetched (data point)
+        from ..data.iv_history import record as _iv
+        rvmap = ({p["symbol"]: p["rv20"] for p in json.loads(PLAN.read_text("utf-8")).get("new_puts", [])}
+                 if PLAN.exists() else {})
+        _iv(quotes, "wheel1", rvmap, today)
+    except Exception:
+        pass
     eq = equity(s, spots)
     s["last_step"] = D
     _save(s)

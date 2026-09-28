@@ -35,3 +35,10 @@ def _isolate_campaign_state(tmp_path, monkeypatch):
     builds a Portal must not rewrite the real campaign's peak."""
     from app.campaign import campaign
     monkeypatch.setattr(campaign, "STATE_PATH", tmp_path / "campaign_state.json")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_iv_history(tmp_path, monkeypatch):
+    """Wheel/watch runs append IV rows; tests must not write the real history."""
+    from app.data import iv_history
+    monkeypatch.setattr(iv_history, "PATH", tmp_path / "iv_daily.jsonl")

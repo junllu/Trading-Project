@@ -32,7 +32,8 @@ PAPER = ROOT / "data" / "paper"
 OUT = ROOT / "data" / "track_gate.json"
 
 MIN = {"rev1.S2": {"days": 20, "trades": 100}, "rev1.S1": {"days": 20, "trades": 60},
-       "trend1": {"days": 40}, "mom1": {"days": 40}, "wheel1": {"days": 40}}
+       "trend1": {"days": 40}, "mom1": {"days": 40}, "wheel1": {"days": 40},
+       "vix1": {"days": 40}}
 T_1K, T_5K, DD_5K = 1.65, 2.0, 25.0
 
 
@@ -111,7 +112,8 @@ def evaluate() -> dict:
     tracks = [rev1_track("rev1.S2", "rev1.C3"), rev1_track("rev1.S1", "rev1.C1"),
               curve_track("trend1", PAPER / "trend1" / "equity.jsonl"),
               curve_track("mom1", PAPER / "mom1" / "equity.jsonl"),
-              curve_track("wheel1", PAPER / "wheel1" / "equity.jsonl")]
+              curve_track("wheel1", PAPER / "wheel1" / "equity.jsonl"),
+              curve_track("vix1", PAPER / "vix1" / "equity.jsonl")]
     best = max(tracks, key=lambda x: x["live_usd"])
     out = {"tracks": tracks, "best": best["track"] if best["live_usd"] else None,
            "live_usd": best["live_usd"]}

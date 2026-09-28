@@ -245,7 +245,12 @@ def refresh(symbols: list[str] | None = None, now: datetime | None = None,
                 if not ok:
                     failed[f"{s} ({st})"] = why
                     continue
-                if prev and rows[-1][0] == prev[-1][0] and len(rows) == len(prev):
+                # Unchanged only if the last bar's VALUES match too: a bar stored
+                # mid-session keeps its date but its close later changes, and a
+                # date-only check would keep the unfinished price forever.
+                if (prev and rows[-1][0] == prev[-1][0] and len(rows) == len(prev)
+                        and all(abs(float(a) - float(b)) < 1e-9
+                                for a, b in zip(prev[-1][1:], rows[-1][1:]))):
                     unchanged += 1
                     continue
                 header = (["date", "close"] if st == "prices"
